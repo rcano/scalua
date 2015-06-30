@@ -55,6 +55,12 @@ object LuaAst {
       print"function (${args.mkString(",")})\n$bodyStr" + print"\nend"
     }
   }
+  case class Class(name: String, params: Seq[String], body: Block) extends LuaTree {
+    def pprint(implicit p: PPrinter) = {
+      print"$name = {}\n" +
+      ""
+    }
+  }
 }
 
 class LuaTranspiler[U <: Universe](val universe: U) extends Transpiler[U] {
