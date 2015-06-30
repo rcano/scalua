@@ -69,13 +69,16 @@ class LuaTranspiler[U <: Universe](val universe: U) extends Transpiler[U] {
 
       case Block(stats, expr) => LuaAst.Block((stats :+ expr) map transform)
       case Ident(name) => LuaAst.Ref(None, name.decodedName.toString)
+      case q"$clazz.this.$select" => LuaAst.Ref(None, "this." + select.decodedName)
       case q"$ident.$select" => LuaAst.Ref(Some(transform(ident)), select.decodedName.toString)
       case q"$prefix.$method(...$args)" => LuaAst.Invoke(Some(transform(prefix)), method.decodedName.toString, args.flatten map transform)
       case q"${method: TermName}(...$args)" => LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
       case q"if ($cond) $thenBranch else $elseBranch" => LuaAst.IfThenElse(transform(cond), transform(thenBranch), transform(elseBranch))
       case q"while ($cond) $expr" => LuaAst.While(transform(cond), transform(expr))
-      case q"def $name(...$argss): $ret = $body" => LuaAst.Var(name.decodedName.toString, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)))
+      case q"def $name[..$tparams](...$argss): $ret = $body" => LuaAst.Var(name.decodedName.toString, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)))
       case q"(..$args) => $body" => LuaAst.Function(args.map(_.name.decodedName.toString), transform(body))
+      case q"class $tpname[..$tparams](...$params) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" => LuaAst.Block(stats.map(transform))
+
 
       case other => throw new UnsupportedOperationException(s"Tree\n${showRaw(other)}\n is not supported")
     }
@@ -109,9 +112,9 @@ object LuaTest extends App {
 
     while (!true) hello = "true"
 
-//    class SomeClassHere(a: Int, b: Int) {
-//      val c = a * b
-//    }
+    class SomeClassHere(a: Int, b: Int) {
+      val c = a * b
+    }
 
   }.tree
   println(s"transforming\n$tree")
