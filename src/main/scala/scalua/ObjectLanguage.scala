@@ -12,12 +12,3 @@ trait ObjectLanguage {
   type DefineValueImplicits
   def defineValue[T](name: String, mutable: Boolean)(implicit i: DefineValueImplicits): Rep[T]
 }
-
-trait Transpiler[U <: Universe] {
-  type Ast
-
-  val universe: U
-  import universe._
-
-  def transform(tree: Tree): Ast
-}
