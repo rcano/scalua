@@ -1,5 +1,7 @@
 package scalua
 
+import language.reflectiveCalls
+
 object LuaTest extends App {
   import scala.reflect.runtime.universe._
   import LuaStdLib._
@@ -32,11 +34,14 @@ object LuaTest extends App {
 
     while (!true) hello = "true"
 
-    class SomeClassHere(a: Int, b: Int) {
+    class SomeClassHere(a: Int, val b: Int) {
       val c = a * b
+
+      def getB = b
     }
 
     someBlock
+    new java.util.ArrayList[Int](14)
 
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
     myMap(2)

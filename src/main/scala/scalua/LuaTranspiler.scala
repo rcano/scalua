@@ -1,4 +1,4 @@
-package scalua 
+package scalua
 
 import language.experimental.macros
 import scala.reflect.macros.Universe
@@ -64,7 +64,7 @@ object LuaAst {
     }
   }
   case class While(cond: LuaTree, expr: LuaTree) extends LuaTree { def pprint(implicit p: PPrinter) = s"while $cond do\n${expr.pprint(p.inc)}\nend" }
-  case class Function(args: Seq[String], body: LuaTree) extends LuaTree { 
+  case class Function(args: Seq[String], body: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
       val incp = p.inc
       val bodyStr = {
@@ -79,8 +79,20 @@ object LuaAst {
   }
   case class Class(name: String, params: Seq[String], body: Block) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
-      print"$name = {}\n" +
-      ""
+      val classMembers = body.stats.groupBy {
+        case Var(_, f: Function) => "defs"
+        case other: Var => "vars"
+        case other => "body"
+      }.withDefaultValue(Seq.empty)
+      val variables = classMembers("vars").map { case Var(name, assignment) => Constant(name) -> assignment }
+      val mappedFunctions = classMembers("defs").map { case Var(name, f: Function) => Constant(name) -> f.copy(args = "self" +: f.args)}
+      val ctor = Var(s"$name.new", Function("self" +: params, Block(Seq(
+              Var("newObj", MapLiteral(variables ++ mappedFunctions)),
+              Var("self.__index", Ref(None, "newObj")),
+              Block(classMembers("body")),
+              Invoke(None, "setmetatable", Seq(Ref(None, "newObj"), Ref(None, "self")))
+            ))))
+      ctor.pprint
     }
   }
   case class StagedNode(tree: Universe#Tree) extends LuaTree {
@@ -98,10 +110,13 @@ class LuaTranspiler[C <: Context](val context: C) {
       case Ident(name) =>
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
         else LuaAst.Ref(None, name.decodedName.toString)
-      case q"$clazz.this.$select" => 
+      case q"$clazz.this.$select" =>
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
-        else LuaAst.Ref(None, "this." + select.decodedName)
-      case q"$ident.$select" => 
+        else {
+          if (tree.symbol.asTerm.isParamAccessor && !tree.symbol.asTerm.isAccessor) LuaAst.Ref(None, select.decodedName.toString) //a pararm accessor does not need self, since its contextualized to the function
+          else LuaAst.Ref(None, "self." + select.decodedName)
+        }
+      case Select(ident, select) =>
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
         else {
           val selected = select.decodedName.toString
@@ -138,12 +153,14 @@ class LuaTranspiler[C <: Context](val context: C) {
         } else if (invokedMethod.owner.isModuleClass) {
           LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
         } else {
-          println(s"Dispatching $invokedMethod from ${invokedMethod.owner}, ${invokedMethod.owner.isModuleClass}")
           LuaAst.Dispatch(Some(transform(prefix)), methodName, args.flatten map transform)
         }
 
-        
+
       case q"${method: TermName}[..$tparams](...$args)" => LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
+      case q"new $clazz[..$tparams](...$args)" =>
+        println("processing class instantiaton " + clazz)
+        LuaAst.Dispatch(Some(transform(clazz)), "new", args.flatten map transform)
 
       case q"var $name = $value" => LuaAst.Var(name.decodedName.toString, transform(value))
       case q"val $name = $value" => LuaAst.Var(name.decodedName.toString, transform(value))
@@ -153,8 +170,11 @@ class LuaTranspiler[C <: Context](val context: C) {
       case q"while ($cond) $expr" => LuaAst.While(transform(cond), transform(expr))
       case q"def $name[..$tparams](...$argss): $ret = $body" => LuaAst.Var(name.decodedName.toString, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)))
       case q"(..$args) => $body" => LuaAst.Function(args.map(_.name.decodedName.toString), transform(body))
-      case q"class $tpname[..$tparams](...$params) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" => LuaAst.Block(stats.map(transform))
-
+      case q"class $tpname[..$tparams](...$argss) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
+        val flatArgs = argss.flatten
+        println(flatArgs)
+        val memberArgs = flatArgs.filter(!_.mods.hasFlag(Flag.LOCAL)).map(v => LuaAst.Var(v.name.decodedName.toString, LuaAst.Ref(None, v.name.decodedName.toString)))
+        LuaAst.Class(tpname.decodedName.toString, flatArgs.map(_.name.decodedName.toString), LuaAst.Block(memberArgs ++ (stats map transform)))
 
       case other => context.abort(other.pos, s"Unsupported tree: ${showRaw(other)}")
     }
