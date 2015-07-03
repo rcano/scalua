@@ -44,6 +44,13 @@ object LuaTest extends App {
     print(i.c)
     print("i.getB is " + i.getB)
 
+    object SomeObject {
+      def tryMe() = "yeah"
+      val someConstant = 42
+    }
+    print(SomeObject.someConstant)
+    print(SomeObject.tryMe())
+
     someBlock
     new java.util.ArrayList[Int](14)
 

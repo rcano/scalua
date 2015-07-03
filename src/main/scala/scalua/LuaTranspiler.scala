@@ -170,10 +170,17 @@ class LuaTranspiler[C <: Context](val context: C) {
       case q"while ($cond) $expr" => LuaAst.While(transform(cond), transform(expr))
       case q"def $name[..$tparams](...$argss): $ret = $body" => LuaAst.Var(name.decodedName.toString, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)))
       case q"(..$args) => $body" => LuaAst.Function(args.map(_.name.decodedName.toString), transform(body))
-      case q"class $tpname[..$tparams](...$argss) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
+      case q"class $tname[..$tparams](...$argss) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
         val flatArgs = argss.flatten
         val memberArgs = flatArgs.filter(!_.mods.hasFlag(Flag.LOCAL)).map(v => LuaAst.Var(v.name.decodedName.toString, LuaAst.Ref(None, v.name.decodedName.toString)))
-        LuaAst.Class(tpname.decodedName.toString, flatArgs.map(_.name.decodedName.toString), LuaAst.Block(memberArgs ++ (stats map transform)))
+        LuaAst.Class(tname.decodedName.toString, flatArgs.map(_.name.decodedName.toString), LuaAst.Block(memberArgs ++ (stats map transform)))
+      case q"object $tname extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
+        val clazz = tname.decodedName.toString
+        LuaAst.Block(Seq(
+            LuaAst.Class(s"${clazz}_MODULE", Seq.empty, LuaAst.Block(stats map transform)),
+            LuaAst.Var(clazz, LuaAst.Dispatch(Some(LuaAst.Ref(None, s"${clazz}_MODULE")), "new", Seq.empty)),
+            LuaAst.Var(s"${clazz}_MODULE", LuaAst.Constant(LuaAst.nil))
+          ))
 
       case other => context.abort(other.pos, s"Unsupported tree: ${showRaw(other)}")
     }
