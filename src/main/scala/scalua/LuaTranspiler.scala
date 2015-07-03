@@ -50,6 +50,12 @@ object LuaAst {
   case class Invoke(prefix: Option[LuaTree], sym: String, args: Seq[LuaTree]) extends LuaTree {
     def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ".")}$sym(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
   }
+  case class InfixOperation(lhs: LuaTree, op: String, rhs: LuaTree) extends LuaTree {
+    def pprint(implicit p: PPrinter) = print"$lhs $op $rhs"
+  }
+  case class UnaryOperation(op: String, expr: LuaTree) extends LuaTree {
+    def pprint(implicit p: PPrinter) = print"$op$expr"
+  }
   case class IfThenElse(cond: LuaTree, thenBranch: LuaTree, elseBranch: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
       val thenStr = thenBranch.pprint(p.inc)
@@ -97,20 +103,26 @@ class LuaTranspiler[C <: Context](val context: C) {
         else LuaAst.Ref(None, "this." + select.decodedName)
       case q"$ident.$select" => 
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
-        else LuaAst.Ref(Some(transform(ident)), select.decodedName.toString)
+        else {
+          val selected = select.decodedName.toString
+          if (selected == "unary_!") LuaAst.UnaryOperation("not ", transform(ident))
+          else LuaAst.Ref(Some(transform(ident)), selected)
+        }
 
-        
+      case q"$prefix.asInstanceOf[$_]" => transform(prefix) //casting has no meaning to lua
       case q"$prefix.$method[..$tparams](...$args)" =>
         val invokedMethod = prefix.symbol match {
           case s: MethodSymbol => prefix.tpe.member(method).asTerm.alternatives.find(_.isMethod).get.asMethod
           case other => prefix.tpe.member(method).asTerm.alternatives.find(_.isMethod).get.asMethod
         }
+        val methodName = method.decodedName.toString
         if (invokedMethod.owner == symbolOf[LuaStdLib.type])
-          LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
+          LuaAst.Invoke(None, methodName, args.flatten map transform)
         else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
           method.encodedName.toString match {
             case "apply" => LuaAst.Ref(None, transform(prefix) + "[" + transform(args.head.head) + "]")
             case "update" => LuaAst.Var(transform(prefix) + "[" + transform(args.head.head) + "]", transform(args.head.tail.head))
+            case "size" => LuaAst.UnaryOperation("#", transform(prefix))
           }
         } else if (invokedMethod.owner == symbolOf[LuaStdLib.Map.type]) {
           println(args)
@@ -118,10 +130,13 @@ class LuaTranspiler[C <: Context](val context: C) {
               case q"scala.this.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
               case q"($a, $b)" => (transform(a), transform(b))
             })
+        } else if (methodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
+          if (methodName == "!=") LuaAst.InfixOperation(transform(prefix), "~=", transform(args.head.head))
+          else LuaAst.InfixOperation(transform(prefix), methodName, transform(args.head.head))
         } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined)
-          LuaAst.Invoke(Some(transform(prefix)), method.decodedName.toString, args.flatten map transform)
+          LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
         else
-          LuaAst.Dispatch(Some(transform(prefix)), method.decodedName.toString, args.flatten map transform)
+          LuaAst.Dispatch(Some(transform(prefix)), methodName, args.flatten map transform)
 
         
       case q"${method: TermName}[..$tparams](...$args)" => LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
@@ -157,6 +172,8 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.Block(stats) => q"scalua.LuaAst.Block(Seq(..$stats))"
       case LuaAst.Dispatch(prefix, sym, args) => q"scalua.LuaAst.Dispatch($prefix, $sym, Seq(..$args))"
       case LuaAst.Invoke(prefix, sym, args) => q"scalua.LuaAst.Dispatch($prefix, $sym, Seq(..$args))"
+      case LuaAst.InfixOperation(l, o, r) => q"scalua.LuaAst.InfixOperation($l, $o, $r)"
+      case LuaAst.UnaryOperation(o, e) => q"scalua.LuaAst.UnaryOperation($o, $e)"
       case LuaAst.IfThenElse(cond, thenB, elseB) => q"scalua.LuaAst.IfThenElse($cond, $thenB, $elseB)"
       case LuaAst.While(cond, expr) => q"scalua.LuaAst.While($cond, $expr)"
       case LuaAst.Function(args, body) => q"scalua.LuaAst.Function(Seq(..$args), $body)"

@@ -11,12 +11,12 @@ object LuaTest extends App {
   val tr = LuaMacro.transpile {
     var hello = "world"
     val world = hello
-    hello = "what"
-    world.stripSuffix("hahah")
+    hello = "what " + hello
+    world.stripSuffix("suffix")
     print("can I even do this?")
     4 * hello.length + 5 * 6
-    if (world.length < 3) print("boo")
-    else if (world.length > 7) print("yay")
+    if (world.length < 3) print("\\\"boo\"")
+    else if (world.length > 7) print("\\\"yay\"")
     else print("meh")
 
     def testMe(x: Int, y: String) = {
@@ -41,6 +41,8 @@ object LuaTest extends App {
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
     myMap(2)
     myMap(10) = "jyu"
+    myMap.size
+    myMap.asInstanceOf[{def AnotherThing: Int}].AnotherThing
   }
   print("Result:\n" + tr.pprint(new LuaAst.PPrinter(0)))
 }
