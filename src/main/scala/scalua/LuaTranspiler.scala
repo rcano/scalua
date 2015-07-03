@@ -112,13 +112,13 @@ class LuaTranspiler[C <: Context](val context: C) {
       case q"$prefix.asInstanceOf[$_]" => transform(prefix) //casting has no meaning to lua
       case q"$prefix.$method[..$tparams](...$args)" =>
         val invokedMethod = prefix.symbol match {
-          case s: MethodSymbol => prefix.tpe.member(method).asTerm.alternatives.find(_.isMethod).get.asMethod
-          case other => prefix.tpe.member(method).asTerm.alternatives.find(_.isMethod).get.asMethod
+          case s: MethodSymbol => prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
+          case other => prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
         }
         val methodName = method.decodedName.toString
-        if (invokedMethod.owner == symbolOf[LuaStdLib.type])
+        if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           LuaAst.Invoke(None, methodName, args.flatten map transform)
-        else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
+        } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
           method.encodedName.toString match {
             case "apply" => LuaAst.Ref(None, transform(prefix) + "[" + transform(args.head.head) + "]")
             case "update" => LuaAst.Var(transform(prefix) + "[" + transform(args.head.head) + "]", transform(args.head.tail.head))
@@ -133,10 +133,14 @@ class LuaTranspiler[C <: Context](val context: C) {
         } else if (methodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
           if (methodName == "!=") LuaAst.InfixOperation(transform(prefix), "~=", transform(args.head.head))
           else LuaAst.InfixOperation(transform(prefix), methodName, transform(args.head.head))
-        } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined)
+        } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined) {
           LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
-        else
+        } else if (invokedMethod.owner.isModuleClass) {
+          LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
+        } else {
+          println(s"Dispatching $invokedMethod from ${invokedMethod.owner}, ${invokedMethod.owner.isModuleClass}")
           LuaAst.Dispatch(Some(transform(prefix)), methodName, args.flatten map transform)
+        }
 
         
       case q"${method: TermName}[..$tparams](...$args)" => LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
@@ -171,7 +175,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.Ref(prefix, name) => q"scalua.LuaAst.Ref($prefix, $name)"
       case LuaAst.Block(stats) => q"scalua.LuaAst.Block(Seq(..$stats))"
       case LuaAst.Dispatch(prefix, sym, args) => q"scalua.LuaAst.Dispatch($prefix, $sym, Seq(..$args))"
-      case LuaAst.Invoke(prefix, sym, args) => q"scalua.LuaAst.Dispatch($prefix, $sym, Seq(..$args))"
+      case LuaAst.Invoke(prefix, sym, args) => q"scalua.LuaAst.Invoke($prefix, $sym, Seq(..$args))"
       case LuaAst.InfixOperation(l, o, r) => q"scalua.LuaAst.InfixOperation($l, $o, $r)"
       case LuaAst.UnaryOperation(o, e) => q"scalua.LuaAst.UnaryOperation($o, $e)"
       case LuaAst.IfThenElse(cond, thenB, elseB) => q"scalua.LuaAst.IfThenElse($cond, $thenB, $elseB)"
