@@ -36,9 +36,13 @@ object LuaTest extends App {
 
     class SomeClassHere(a: Int, val b: Int) {
       val c = a * b
-
-      def getB = b
+      print("The value of a * b is " + c)
+      def getB() = b
     }
+    val i = new SomeClassHere(5, 6)
+    print(i.b)
+    print(i.c)
+    print("i.getB is " + i.getB)
 
     someBlock
     new java.util.ArrayList[Int](14)
