@@ -38,11 +38,16 @@ object LuaTest extends App {
       val c = a * b
       print("The value of a * b is " + c)
       def getB() = b
+
+      object inner {
+        val v = 42
+      }
     }
     val i = new SomeClassHere(5, 6)
     print(i.b)
     print(i.c)
     print("i.getB is " + i.getB)
+    print("inner.v = " + i.inner.v)
 
     object SomeObject {
       def tryMe() = "yeah"

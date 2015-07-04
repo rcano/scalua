@@ -32,7 +32,7 @@ object LuaAst {
       print"{$entriesStr}"
     }
   }
-  case class Var(name: String, value: LuaTree) extends LuaTree { def pprint(implicit p: PPrinter) = print"$name = $value" }
+  case class Var(name: String, value: LuaTree) extends LuaTree { def pprint(implicit p: PPrinter) = print"$name = " + value.pprint.trim }
   case class Ref(prefix: Option[LuaTree], name: String) extends LuaTree { def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ".") + name}" }
   case class Block(stats: Seq[LuaTree]) extends LuaTree { def pprint(implicit p: PPrinter) = {
       stats.map(_.pprint).mkString("\n")
@@ -74,27 +74,33 @@ object LuaAst {
           case other => print"return " + other.pprint.trim
         }
       }
-      print"function (${args.mkString(",")})\n$bodyStr" + print"\nend"
+      print"function (${args.mkString(",")})\n$bodyStr\n" + print"end"
     }
   }
   case class Class(name: String, params: Seq[String], body: Block) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
-      val classMembers = body.stats.groupBy {
-        case Var(_, f: Function) => "defs"
-        case other: Var => "vars"
-        case other => "body"
-      }.withDefaultValue(Seq.empty)
-      val variables = classMembers("vars").map { case Var(name, assignment) => Var(s"self.$name", assignment) }
-      val mappedFunctions = classMembers("defs").map { case Var(name, f: Function) => Constant(name) -> f.copy(args = "self" +: f.args)}
+      val classMembers = body.stats.map {
+        case Var(name, f: Function) => Var(s"self.$name", f.copy(args = "self" +: f.args))
+        case Var(name, assignment) => Var(s"self.$name", assignment)
+        case s: Singleton => Block(Seq(s, Var(s"self.${s.name}", Ref(None, s.name))))
+        case other => other
+      }
       val ctor = Var(s"$name.new", Function("class" +: params, Block(Seq(
-              Var("newObj", MapLiteral(mappedFunctions)),
-              Var("self", Ref(None, "newObj")),
-              Block(variables),
+              Var("local self", MapLiteral(Seq.empty)),
               Var("class.__index", Ref(None, "class")),
-              Block(classMembers("body")),
-              Invoke(None, "setmetatable", Seq(Ref(None, "newObj"), Ref(None, "class")))
+              Block(classMembers),
+              Invoke(None, "setmetatable", Seq(Ref(None, "self"), Ref(None, "class")))
             ))))
       Block(Seq(Var(name, MapLiteral(Seq.empty)), ctor)).pprint
+    }
+  }
+  case class Singleton(name: String, body: Block) extends LuaTree {
+    def pprint(implicit p: PPrinter) = {
+      LuaAst.Block(Seq(
+          LuaAst.Class(s"${name}_MODULE", Seq.empty, body),
+          LuaAst.Var(name, LuaAst.Dispatch(Some(LuaAst.Ref(None, s"${name}_MODULE")), "new", Seq.empty)),
+          LuaAst.Var(s"${name}_MODULE", LuaAst.Constant(LuaAst.nil))
+        )).pprint
     }
   }
   case class StagedNode(tree: Universe#Tree) extends LuaTree {
@@ -176,11 +182,7 @@ class LuaTranspiler[C <: Context](val context: C) {
         LuaAst.Class(tname.decodedName.toString, flatArgs.map(_.name.decodedName.toString), LuaAst.Block(memberArgs ++ (stats map transform)))
       case q"object $tname extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
         val clazz = tname.decodedName.toString
-        LuaAst.Block(Seq(
-            LuaAst.Class(s"${clazz}_MODULE", Seq.empty, LuaAst.Block(stats map transform)),
-            LuaAst.Var(clazz, LuaAst.Dispatch(Some(LuaAst.Ref(None, s"${clazz}_MODULE")), "new", Seq.empty)),
-            LuaAst.Var(s"${clazz}_MODULE", LuaAst.Constant(LuaAst.nil))
-          ))
+        LuaAst.Singleton(clazz, LuaAst.Block(stats map transform))
 
       case other => context.abort(other.pos, s"Unsupported tree: ${showRaw(other)}")
     }
@@ -208,6 +210,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.While(cond, expr) => q"scalua.LuaAst.While($cond, $expr)"
       case LuaAst.Function(args, body) => q"scalua.LuaAst.Function(Seq(..$args), $body)"
       case LuaAst.Class(name, params, body) => q"scalua.LuaAst.Class($name, Seq(..$params), ${body: LuaAst.LuaTree})"
+      case LuaAst.Singleton(name, body) => q"scalua.LuaAst.Singleton($name, ${body: LuaAst.LuaTree})"
       case LuaAst.MapLiteral(entries) => q"scalua.LuaAst.MapLiteral(Seq(..$entries))"
       case LuaAst.StagedNode(tree) => tree.asInstanceOf[Tree]
     }
