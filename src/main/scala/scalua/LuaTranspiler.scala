@@ -77,6 +77,13 @@ object LuaAst {
       print"function (${args.mkString(",")})\n$bodyStr\n" + print"end"
     }
   }
+  case class For(iteratorName: String, from: LuaTree, to: LuaTree, step: LuaTree, code: LuaTree) extends LuaTree {
+    def pprint(implicit p: PPrinter) = {
+      print"for $iteratorName = $from, $to, $step do\n" +
+      code.pprint(p.inc) + "\n" +
+      print"end"
+    }
+  }
   case class Class(name: String, params: Seq[String], body: Block, local: Boolean) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
       val classMembers = body.stats.map {
@@ -140,7 +147,14 @@ class LuaTranspiler[C <: Context](val context: C) {
         }
         val methodName = method.decodedName.toString
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
-          LuaAst.Invoke(None, methodName, args.flatten map transform)
+          if (methodName == "cfor") {
+            val Seq(from, to, step) = args.head
+            val (params, body) = transform(args.tail.head.head) match {
+              case LuaAst.Function(params, body) => (params, body)
+              case LuaAst.Block(Seq(LuaAst.Function(params, body))) => (params, body)
+            }
+            LuaAst.For(params.head, transform(from), transform(to), if (step.toString.contains("cfor$default$")) LuaAst.Constant(1) else transform(step), body)
+          } else LuaAst.Invoke(None, methodName, args.flatten map transform)
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
           method.encodedName.toString match {
             case "apply" => LuaAst.Ref(None, transform(prefix) + "[" + transform(args.head.head) + "]")
@@ -152,9 +166,12 @@ class LuaTranspiler[C <: Context](val context: C) {
               case q"scala.this.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
               case q"($a, $b)" => (transform(a), transform(b))
             })
+        } else if (invokedMethod.owner.asType.toType =:= typeOf[String]) {
+          if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
+          else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
+          else context.abort(tree.pos, "Unsupported String api $invokedMethod")
         } else if (methodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
           if (methodName == "!=") LuaAst.InfixOperation(transform(prefix), "~=", transform(args.head.head))
-          else if (methodName == "+" && invokedMethod.owner.asType.toType =:= typeOf[String]) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else LuaAst.InfixOperation(transform(prefix), methodName, transform(args.head.head))
         } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined) {
           LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
@@ -209,6 +226,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.IfThenElse(cond, thenB, elseB) => q"scalua.LuaAst.IfThenElse($cond, $thenB, $elseB)"
       case LuaAst.While(cond, expr) => q"scalua.LuaAst.While($cond, $expr)"
       case LuaAst.Function(args, body) => q"scalua.LuaAst.Function(Seq(..$args), $body)"
+      case LuaAst.For(iteratorName, from, to, step, code) => q"scalua.LuaAst.For($iteratorName, $from, $to, $step, $code)"
       case LuaAst.Class(name, params, body, local) => q"scalua.LuaAst.Class($name, Seq(..$params), ${body: LuaAst.LuaTree}, $local)"
       case LuaAst.Singleton(name, body, local) => q"scalua.LuaAst.Singleton($name, ${body: LuaAst.LuaTree}, $local)"
       case LuaAst.MapLiteral(entries) => q"scalua.LuaAst.MapLiteral(Seq(..$entries))"

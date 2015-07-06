@@ -23,4 +23,6 @@ object LuaStdLib {
       def size = map.size
     }
   }
+
+  def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit) = ???
 }

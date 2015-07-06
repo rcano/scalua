@@ -57,7 +57,8 @@ object LuaTest extends App {
     print(SomeObject.tryMe())
 
     someBlock
-    new java.util.ArrayList[Int](14)
+
+    cfor(1, 100, "10".size)(print)
 
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
     myMap(2)
