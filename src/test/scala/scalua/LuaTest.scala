@@ -1,20 +1,20 @@
 package scalua
 
 import language.reflectiveCalls
+import Predef.ArrowAssoc
 
 object LuaTest extends App {
   import scala.reflect.runtime.universe._
   import LuaStdLib._
 
   val someBlock = LuaMacro.transpile {
-    print("hello" * 3)
+    print("hello")
   }
 
   val tr = LuaMacro.transpile {
     var hello = "world"
     val world = hello
     hello = "what " + hello
-    world.stripSuffix("suffix")
     print("can I even do this?")
     4 * hello.length + 5 * 6
     if (world.length < 3) print("\\\"boo\"")
@@ -23,7 +23,6 @@ object LuaTest extends App {
 
     def testMe(x: Int, y: String) = {
       print("lalala")
-      y * x
     }
     testMe(1, "2")
 
@@ -58,7 +57,7 @@ object LuaTest extends App {
 
     someBlock
 
-    cfor(1, 100, "10".size)(print)
+    cfor(1, 100, "10".length)(print)
 
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
     myMap(2)

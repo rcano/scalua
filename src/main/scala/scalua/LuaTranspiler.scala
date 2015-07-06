@@ -1,6 +1,7 @@
 package scalua
 
 import language.experimental.macros
+import Predef._
 import scala.reflect.macros.Universe
 import scala.reflect.macros.blackbox.Context
 
@@ -163,7 +164,7 @@ class LuaTranspiler[C <: Context](val context: C) {
           }
         } else if (invokedMethod.owner == symbolOf[LuaStdLib.Map.type]) {
           LuaAst.MapLiteral(args.flatten.map {
-              case q"scala.this.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
+              case q"$prefix.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
               case q"($a, $b)" => (transform(a), transform(b))
             })
         } else if (invokedMethod.owner.asType.toType =:= typeOf[String]) {

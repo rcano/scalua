@@ -8,7 +8,7 @@ fork := true
 
 outputStrategy := Some(StdoutOutput)
 
-scalacOptions ++= Seq("-deprecation", "-feature", "-Yinfer-argument-types", "-Ybackend:GenBCode", "-Ydelambdafy:method", "-target:jvm-1.8")
+scalacOptions ++= Seq("-deprecation", "-feature", "-Yinfer-argument-types", "-Yno-predef", "-Ybackend:GenBCode", "-Ydelambdafy:method", "-target:jvm-1.8")
 
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
