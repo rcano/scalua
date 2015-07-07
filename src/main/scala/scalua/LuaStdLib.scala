@@ -30,5 +30,23 @@ object LuaStdLib {
   implicit class StringLib(val s: String) extends AnyVal {
     @extensionMethod
     def sub(i: Int, j: Int): String = ???
+    @extensionMethod
+    def sub(i: Int): String = ???
+
+    @extensionMethod
+    @renamed("rep")
+    def *(i: Int): String = ???
+
+    @extensionMethod
+    def lower(): String = ???
+    @extensionMethod
+    def upper(): String = ???
+
+    @extensionMethod
+    def reverse(): String = ???
+
+    @extensionMethod
+    @renamed("match")
+    def matches(other: String, pattern: String) = ???
   }
 }

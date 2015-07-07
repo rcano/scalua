@@ -172,20 +172,24 @@ class LuaTranspiler[C <: Context](val context: C) {
           if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
           else context.abort(tree.pos, "Unsupported String api $invokedMethod")
-        } else if (methodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
-          if (methodName == "!=") LuaAst.InfixOperation(transform(prefix), "~=", transform(args.head.head))
-          else LuaAst.InfixOperation(transform(prefix), methodName, transform(args.head.head))
         } else {
           val target = if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[extensionMethod]).isDefined)
             prefix.collect { case q"$implicitConv($target)" => target }.headOption getOrElse prefix
           else
             prefix
-          if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined) {
-            LuaAst.Invoke(Some(transform(target)), methodName, args.flatten map transform)
-          } else if (invokedMethod.owner.isModuleClass) {
-            LuaAst.Invoke(Some(transform(target)), methodName, args.flatten map transform)
+          val targetMethodName = invokedMethod.annotations.find(_.tree.tpe =:= typeOf[renamed]) match {
+            case Some(r) => 
+              val List(Literal(Constant(s: String))) = r.tree.children.tail
+              s
+            case _ => methodName
+          }
+          if (targetMethodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
+            if (targetMethodName == "!=") LuaAst.InfixOperation(transform(target), "~=", transform(args.head.head))
+            else LuaAst.InfixOperation(transform(target), targetMethodName, transform(args.head.head))
+          } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined || invokedMethod.owner.isModuleClass) {
+            LuaAst.Invoke(Some(transform(target)), targetMethodName, args.flatten map transform)
           } else {
-            LuaAst.Dispatch(Some(transform(target)), methodName, args.flatten map transform)
+            LuaAst.Dispatch(Some(transform(target)), targetMethodName, args.flatten map transform)
           }
         }
 
@@ -212,7 +216,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case other => context.abort(other.pos, s"Unsupported tree: ${showRaw(other)}")
     }
   } catch {
-    case util.control.NonFatal(e) => context.abort(tree.pos, s"Failed to process due to $e")
+    case util.control.NonFatal(e) => context.abort(tree.pos, s"Failed to process due to $e\n" + e.getStackTrace.take(10).mkString("\n"))
   }
   def transpile(tree: Tree): Tree = {
     println(s"Processing\n$tree")

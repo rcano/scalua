@@ -13,3 +13,8 @@ class invoke extends StaticAnnotation
  * the surrounding implicit transformation is discarded and AST is generated as if the method has always been a part of the augmented type.
  */
 class extensionMethod extends StaticAnnotation
+
+/**
+ * Renames the annotated method when produced.
+ */
+class renamed(value: String) extends StaticAnnotation
