@@ -8,7 +8,7 @@ object LuaTest extends App {
   import LuaStdLib._
 
   val someBlock = LuaMacro.transpile {
-    print("hello")
+    print("hello".sub(2,3))
   }
 
   val tr = LuaMacro.transpile {

@@ -26,4 +26,9 @@ object LuaStdLib {
   }
 
   def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit) = ???
+
+  implicit class StringLib(val s: String) extends AnyVal {
+    @extensionMethod
+    def sub(i: Int, j: Int): String = ???
+  }
 }

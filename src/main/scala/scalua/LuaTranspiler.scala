@@ -167,6 +167,7 @@ class LuaTranspiler[C <: Context](val context: C) {
               case q"$prefix.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
               case q"($a, $b)" => (transform(a), transform(b))
             })
+
         } else if (invokedMethod.owner.asType.toType =:= typeOf[String]) {
           if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
@@ -174,12 +175,18 @@ class LuaTranspiler[C <: Context](val context: C) {
         } else if (methodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
           if (methodName == "!=") LuaAst.InfixOperation(transform(prefix), "~=", transform(args.head.head))
           else LuaAst.InfixOperation(transform(prefix), methodName, transform(args.head.head))
-        } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined) {
-          LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
-        } else if (invokedMethod.owner.isModuleClass) {
-          LuaAst.Invoke(Some(transform(prefix)), methodName, args.flatten map transform)
         } else {
-          LuaAst.Dispatch(Some(transform(prefix)), methodName, args.flatten map transform)
+          val target = if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[extensionMethod]).isDefined)
+            prefix.collect { case q"$implicitConv($target)" => target }.headOption getOrElse prefix
+          else
+            prefix
+          if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined) {
+            LuaAst.Invoke(Some(transform(target)), methodName, args.flatten map transform)
+          } else if (invokedMethod.owner.isModuleClass) {
+            LuaAst.Invoke(Some(transform(target)), methodName, args.flatten map transform)
+          } else {
+            LuaAst.Dispatch(Some(transform(target)), methodName, args.flatten map transform)
+          }
         }
 
 
