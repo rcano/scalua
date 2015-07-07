@@ -47,6 +47,16 @@ object LuaStdLib {
 
     @extensionMethod
     @renamed("match")
-    def matches(other: String, pattern: String) = ???
+    def matches(pattern: String, index: Int) = ???
+    @extensionMethod
+    @renamed("match")
+    def matches(pattern: String) = ???
+
+    @extensionMethod
+    def format(args: Any*) = ???
+
+    @extensionMethod
+    def gmatch(pattern: String)
+
   }
 }
