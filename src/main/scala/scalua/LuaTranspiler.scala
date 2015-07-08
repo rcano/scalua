@@ -27,7 +27,9 @@ object LuaAst {
       case s: String => print"""${'"' + s.replace("\"", "\\\"") + '"'}"""
       case null => print"nil"
       case other => print"${String valueOf other}"
-    } }
+    }
+  }
+  case class Tuple(values: Seq[LuaTree]) extends LuaTree { def pprint(implicit p: PPrinter) = print"${values.map(_.pprint(p.inc).trim).mkString(", ")}"}
   case class MapLiteral(entries: Seq[(LuaTree, LuaTree)]) extends LuaTree { def pprint(implicit p: PPrinter) =  {
       val entriesStr = entries.map(e => s"[${e._1}] = ${e._2}").mkString(", ")
       print"{$entriesStr}"
@@ -228,6 +230,7 @@ class LuaTranspiler[C <: Context](val context: C) {
     def apply(node) = node match {
       case LuaAst.Constant(LuaAst.nil) => q"scalua.LuaAst.Constant(scalua.LuaAst.nil)"
       case LuaAst.Constant(n) => q"scalua.LuaAst.Constant(${Literal(Constant(n))})"
+      case LuaAst.Tuple(v) => q"scalua.LuaAst.Tuple(Seq(..$v))"
       case LuaAst.Var(n, v, l) => q"scalua.LuaAst.Var($n, $v, $l)"
       case LuaAst.Ref(prefix, name) => q"scalua.LuaAst.Ref($prefix, $name)"
       case LuaAst.Block(stats) => q"scalua.LuaAst.Block(Seq(..$stats))"

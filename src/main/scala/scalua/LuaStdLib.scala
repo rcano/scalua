@@ -56,7 +56,7 @@ object LuaStdLib {
     def format(args: Any*) = ???
 
     @extensionMethod
-    def gmatch(pattern: String)
+    def gmatch(pattern: String) = ???
 
   }
 }
