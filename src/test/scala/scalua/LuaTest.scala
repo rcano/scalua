@@ -27,7 +27,10 @@ object LuaTest extends App {
     testMe(1, "2")
 
     val tuple = (1,2,3)
-    tuple._2
+    print(tuple._2)
+
+    def testMeTuple(x: Int, y: Int) = (x, y)
+    val tuple2 = testMeTuple(1,2)
 
     for {
       a <- Seq(1, 2, 3)
