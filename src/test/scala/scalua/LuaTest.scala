@@ -26,6 +26,9 @@ object LuaTest extends App {
     }
     testMe(1, "2")
 
+    val tuple = (1,2,3)
+    tuple._2
+
     for {
       a <- Seq(1, 2, 3)
       b <- Seq(4, 5, 6) if a != b
@@ -35,6 +38,7 @@ object LuaTest extends App {
 
     class SomeClassHere(a: Int, val b: Int) {
       val c = a * b
+      val tuple = (a, b, c)
       print("The value of a * b is " + c)
       def getB() = b
 
@@ -45,6 +49,7 @@ object LuaTest extends App {
     val i = new SomeClassHere(5, 6)
     print(i.b)
     print(i.c)
+    print(i.tuple._2)
     print("i.getB is " + i.getB)
     print("inner.v = " + i.inner.v)
 
