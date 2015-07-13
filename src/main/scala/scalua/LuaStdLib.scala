@@ -29,12 +29,8 @@ object LuaStdLib {
     }
   }
 
-  trait List[T] {
-    
-  }
-  object List {
-    def apply[T](elems: T*) = ???
-  }
+
+  def List[T](elems: T*): Map[Int, T] = ???
 
   def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit): Unit = ???
   def iterate[R, State, F](iterator: Iterator[R, State], state: State = ???, init: State = ???)(implicit magnet: FunctionMagnet[R, F]): IterateApply[R, State, F] = ???
@@ -70,18 +66,19 @@ object LuaStdLib {
     @extensionMethod
     def reverse(): String = ???
 
-    @extensionMethod
-    @renamed("match")
-    def matches(pattern: String, index: Int) = ???
-    @extensionMethod
-    @renamed("match")
-    def matches(pattern: String) = ???
+    //TODO: in order to implement match I need support for ntuple
+//    @extensionMethod
+//    @renamed("match")
+//    def matches(pattern: String, index: Int): List[String] = ???
+//    @extensionMethod
+//    @renamed("match")
+//    def matches(pattern: String): List[String] = ???
 
     @extensionMethod
     def format(args: Any*): String = ???
 
     @extensionMethod
-    def gmatch(pattern: String) = ???
+    def gmatch(pattern: String): Iterator[Tuple1[String], Unit] = ???
 
   }
 }

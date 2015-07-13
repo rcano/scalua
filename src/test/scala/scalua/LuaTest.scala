@@ -79,6 +79,8 @@ object LuaTest extends App {
       print(k)
       print(v)
     }
+
+    List(1, "a", myMap)
   }
   print("Result:\n" + tr.pprint(new LuaAst.PPrinter(0)))
 }

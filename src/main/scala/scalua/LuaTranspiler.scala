@@ -186,6 +186,8 @@ class LuaTranspiler[C <: Context](val context: C) {
               case LuaAst.Block(Seq(LuaAst.Function(params, body))) => (params, body)
             }
             LuaAst.For(params.head, transform(from), transform(to), if (trueArgs.head.size < args.head.size) LuaAst.Constant(1) else transform(step), body)
+          } else if (methodName == "List") {
+            LuaAst.MapLiteral(args.head.zipWithIndex.map { case (arg, i) => (LuaAst.Constant(i + 1), transform(arg)) })
           } else LuaAst.Invoke(None, methodName, args.flatten map transform)
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.IterateApply[_, _, _]]) != NoType) {
           println("iterate's prefix: " + transform(prefix))
