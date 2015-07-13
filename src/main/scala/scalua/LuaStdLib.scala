@@ -37,7 +37,20 @@ object LuaStdLib {
   }
 
   def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit): Unit = ???
-  def cfor[R, State](iterator: Iterator[R, State], state: State = null, init: State = null)(f: R => Unit): Unit = ???
+  def iterate[R, State, F](iterator: Iterator[R, State], state: State = ???, init: State = ???)(implicit magnet: FunctionMagnet[R, F]): IterateApply[R, State, F] = ???
+  sealed trait IterateApply[R, State, F] {
+    def apply(f: F): Unit = ???
+  }
+
+  sealed trait FunctionMagnet[R, F]
+  implicit def fm1[T1]: FunctionMagnet[Tuple1[T1], T1 => Unit] = ???
+  implicit def fm2[T1, T2]: FunctionMagnet[(T1, T2), (T1, T2) => Unit] = ???
+  implicit def fm3[T1, T2, T3]: FunctionMagnet[(T1, T2, T3), (T1, T2, T3) => Unit] = ???
+  implicit def fm4[T1, T2, T3, T4]: FunctionMagnet[(T1, T2, T3, T4), (T1, T2, T3, T4) => Unit] = ???
+  implicit def fm5[T1, T2, T3, T4, T5]: FunctionMagnet[(T1, T2, T3, T4, T5), (T1, T2, T3, T4, T5) => Unit] = ???
+  implicit def fm6[T1, T2, T3, T4, T5, T6]: FunctionMagnet[(T1, T2, T3, T4, T5, T6), (T1, T2, T3, T4, T5, T6) => Unit] = ???
+  implicit def fm7[T1, T2, T3, T4, T5, T6, T7]: FunctionMagnet[(T1, T2, T3, T4, T5, T6, T7), (T1, T2, T3, T4, T5, T6, T7) => Unit] = ???
+  implicit def fm8[T1, T2, T3, T4, T5, T6, T7, T8]: FunctionMagnet[(T1, T2, T3, T4, T5, T6, T7, T8), (T1, T2, T3, T4, T5, T6, T7, T8) => Unit] = ???
 
   implicit class StringLib(val s: String) extends AnyVal {
     @extensionMethod

@@ -77,7 +77,7 @@ object LuaAst {
           case Block(sts) => sts.init.iterator.map {
               case v: Var => v.copy(local = true)
               case other => other
-          }.map(_.pprint).mkString("\n") + "\n" + print"return " + sts.last.pprint.trim
+            }.map(_.pprint).mkString("\n") + "\n" + print"return " + sts.last.pprint.trim
           case other => print"return " + other.pprint.trim
         }
       }
@@ -87,6 +87,13 @@ object LuaAst {
   case class For(iteratorName: String, from: LuaTree, to: LuaTree, step: LuaTree, code: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
       print"for $iteratorName = $from, $to, $step do\n" +
+      code.pprint(p.inc) + "\n" +
+      print"end"
+    }
+  }
+  case class Iterate(vars: Seq[String], iterator: LuaTree, state: Option[LuaTree], init: Option[LuaTree], code: LuaTree) extends LuaTree {
+    def pprint(implicit p: PPrinter) = {
+      print"for ${vars.mkString(", ")} in " + (Some(iterator) ++ state ++ init).mkString(", ") + " do\n" +
       code.pprint(p.inc) + "\n" +
       print"end"
     }
@@ -129,9 +136,9 @@ class LuaTranspiler[C <: Context](val context: C) {
       case Literal(Constant(l)) => LuaAst.Constant(if (l == (())) LuaAst.nil else l)
 
       case Block(stats, expr) => LuaAst.Block(((stats :+ expr).iterator map transform flatMap { //flatten nested blocks
-            case v: LuaAst.Block => v.stats
-            case other => List(other)
-          }).toSeq)
+              case v: LuaAst.Block => v.stats
+              case other => List(other)
+            }).toSeq)
 
       case q"$tuple.$field" if definitions.TupleClass.seq.exists(_ == tree.symbol.owner) && field.encodedName.toString.matches("_\\d+") =>
         tuple match {
@@ -163,15 +170,35 @@ class LuaTranspiler[C <: Context](val context: C) {
           case other => prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
         }
         val methodName = method.decodedName.toString
+        //attempt to identify default arguments passed
+        val trueArgs = invokedMethod.paramLists.zip(args).map(t => t._1 zip t._2 filter {
+            case (param, arg) if param.asTerm.isParamWithDefault && arg.toString.contains(s"$methodName$$default$$") => false
+            case _ => true
+          })
+
+
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
+            //need to identify which version of for this is
             val Seq(from, to, step) = args.head
             val (params, body) = transform(args.tail.head.head) match {
               case LuaAst.Function(params, body) => (params, body)
               case LuaAst.Block(Seq(LuaAst.Function(params, body))) => (params, body)
             }
-            LuaAst.For(params.head, transform(from), transform(to), if (step.toString.contains("cfor$default$")) LuaAst.Constant(1) else transform(step), body)
+            LuaAst.For(params.head, transform(from), transform(to), if (trueArgs.head.size < args.head.size) LuaAst.Constant(1) else transform(step), body)
           } else LuaAst.Invoke(None, methodName, args.flatten map transform)
+        } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.IterateApply[_, _, _]]) != NoType) {
+          println("iterate's prefix: " + transform(prefix))
+          println("iterate's body: " + args)
+          val LuaAst.Invoke(_, _, Seq(iterator, state, init, _)) = transform(prefix)
+          val (params, body) = transform(args.head.head) match {
+            case LuaAst.Function(params, body) => (params, body)
+            case LuaAst.Block(Seq(LuaAst.Function(params, body))) => (params, body)
+          }
+          LuaAst.Iterate(params, iterator,
+                         if (!state.toString.contains("$default$")) Some(state) else None,
+                         if (!init.toString.contains("$default$")) Some(init) else None,
+                         body)
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
           method.encodedName.toString match {
             case "apply" => LuaAst.Ref(None, transform(prefix) + "[" + transform(args.head.head) + "]")
@@ -265,6 +292,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.While(cond, expr) => q"scalua.LuaAst.While($cond, $expr)"
       case LuaAst.Function(args, body) => q"scalua.LuaAst.Function(Seq(..$args), $body)"
       case LuaAst.For(iteratorName, from, to, step, code) => q"scalua.LuaAst.For($iteratorName, $from, $to, $step, $code)"
+      case LuaAst.Iterate(params, it, state, step, code) => q"scalua.LuaAst.Iterate(Seq(..$params), $it, $state, $step, $code)"
       case LuaAst.Class(name, params, body, local) => q"scalua.LuaAst.Class($name, Seq(..$params), ${body: LuaAst.LuaTree}, $local)"
       case LuaAst.Singleton(name, body, local) => q"scalua.LuaAst.Singleton($name, ${body: LuaAst.LuaTree}, $local)"
       case LuaAst.MapLiteral(entries) => q"scalua.LuaAst.MapLiteral(Seq(..$entries))"

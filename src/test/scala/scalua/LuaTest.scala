@@ -16,9 +16,9 @@ object LuaTest extends App {
     val world = hello
     hello = "what " + hello
     print("can I even do this?")
-    4 * hello.length + 5 * 6
-    if (world.length < 3) print("\\\"boo\"")
-    else if (world.length > 7) print("\\\"yay\"")
+    print(4 * hello.length + 5 * 6)
+    if (world.length < 3) print("\"boo\"")
+    else if (world.length > 7) print("\"yay\"")
     else print("meh")
 
     def testMe(x: Int, y: String) = {
@@ -65,6 +65,7 @@ object LuaTest extends App {
 
     someBlock
 
+    cfor(1, 100)(print)
     cfor(1, 100, "10".length)(print)
 
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
@@ -72,6 +73,12 @@ object LuaTest extends App {
     myMap(10) = "jyu"
     myMap.size
     myMap.asInstanceOf[{def AnotherThing: Int}].AnotherThing
+
+    print("ok")
+    iterate(pairs(myMap)).apply { (k, v) =>
+      print(k)
+      print(v)
+    }
   }
   print("Result:\n" + tr.pprint(new LuaAst.PPrinter(0)))
 }
