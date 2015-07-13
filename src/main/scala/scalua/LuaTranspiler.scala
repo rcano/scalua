@@ -74,7 +74,10 @@ object LuaAst {
       val bodyStr = {
         implicit val p = incp
         body match {
-          case Block(sts) => sts.init.map(_.pprint).mkString("\n") + "\n" + print"return " + sts.last.pprint.trim
+          case Block(sts) => sts.init.iterator.map {
+              case v: Var => v.copy(local = true)
+              case other => other
+          }.map(_.pprint).mkString("\n") + "\n" + print"return " + sts.last.pprint.trim
           case other => print"return " + other.pprint.trim
         }
       }
@@ -125,7 +128,10 @@ class LuaTranspiler[C <: Context](val context: C) {
     tree match { // the order of the statements determine priority, needs to be handle with care. Incorrect order may trigger SOE
       case Literal(Constant(l)) => LuaAst.Constant(if (l == (())) LuaAst.nil else l)
 
-      case Block(stats, expr) => LuaAst.Block((stats :+ expr) map transform)
+      case Block(stats, expr) => LuaAst.Block(((stats :+ expr).iterator map transform flatMap { //flatten nested blocks
+            case v: LuaAst.Block => v.stats
+            case other => List(other)
+          }).toSeq)
 
       case q"$tuple.$field" if definitions.TupleClass.seq.exists(_ == tree.symbol.owner) && field.encodedName.toString.matches("_\\d+") =>
         tuple match {
