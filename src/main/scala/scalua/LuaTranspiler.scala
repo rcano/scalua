@@ -318,7 +318,7 @@ class LuaTranspiler[C <: Context](val context: C) {
           case ((bindsAggr, res, setupAggr), (binds, cond, setup)) => (bindsAggr :+ binds, LuaAst.InfixOperation(res, "and", cond), setupAggr ++ setup)
         }
         val setup = Some(LuaAst.Block(unapplyTuple +: setups))
-        (LuaAst.Block(binds), cond, setup)
+        (LuaAst.Block(binds.filterNot(No.==)), cond, setup)
       case pq"$literal" => (No, LuaAst.InfixOperation(expr, "==", transform(literal)), None)
     }
 
