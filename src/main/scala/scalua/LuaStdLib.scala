@@ -48,6 +48,11 @@ object LuaStdLib {
   implicit def fm7[T1, T2, T3, T4, T5, T6, T7]: FunctionMagnet[(T1, T2, T3, T4, T5, T6, T7), (T1, T2, T3, T4, T5, T6, T7) => Unit] = ???
   implicit def fm8[T1, T2, T3, T4, T5, T6, T7, T8]: FunctionMagnet[(T1, T2, T3, T4, T5, T6, T7, T8), (T1, T2, T3, T4, T5, T6, T7, T8) => Unit] = ???
 
+  implicit class AnyLib(val a: Any) extends AnyVal {
+    @extensionMethod @invokeAsField
+    def __className(): String = ???
+  }
+
   implicit class StringLib(val s: String) extends AnyVal {
     @extensionMethod
     def sub(i: Int, j: Int): String = ???

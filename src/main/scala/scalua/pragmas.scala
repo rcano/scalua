@@ -9,6 +9,11 @@ import scala.annotation.StaticAnnotation
 class invoke extends StaticAnnotation
 
 /**
+ * Marks a method that takes no arguments as simple field in lua.
+ */
+class invokeAsField extends StaticAnnotation
+
+/**
  * This annotation is used when implicitly augmenting a type to introduce new methods. When this annotation is present in a method,
  * the surrounding implicit transformation is discarded and AST is generated as if the method has always been a part of the augmented type.
  */

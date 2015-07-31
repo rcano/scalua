@@ -18,7 +18,7 @@ object LuaTest extends App {
     print("can I even do this?")
     print(4 * hello.length + 5 * 6)
     if (world.length < 3) print("\"boo\"")
-    else if (world.length > 7) print("\"yay\"")
+    else if (world.length > 7 || world.length < 10) print("\"yay\"")
     else print("meh")
 
     def testMe(x: Int, y: String) = {
@@ -55,6 +55,7 @@ object LuaTest extends App {
     print(i.tuple._2)
     print("i.getB is " + i.getB)
     print("inner.v = " + i.inner.v)
+    print(i.__className)
 
     object SomeObject {
       def tryMe() = "yeah"
