@@ -14,6 +14,7 @@ object PatternMatchTest extends App {
       case any: String => print("got any " + any)
       case "someLiteral" => print("someLiteral")
       case number @(41 | 42 | 43) => print(number)
+      case 41 | SomeClass("a", 42, null) => "b"
     }
   }
   Predef.println(res)
