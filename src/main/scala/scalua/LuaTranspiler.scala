@@ -225,7 +225,7 @@ class LuaTranspiler[C <: Context](val context: C) {
         } else if (invokedMethod.owner.asType.toType =:= typeOf[String]) {
           if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
-          else context.abort(tree.pos, "Unsupported String api $invokedMethod")
+          else context.abort(tree.pos, s"Unsupported String api $invokedMethod")
         } else {
           val target = if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[extensionMethod]).isDefined)
             prefix.collect { case q"$implicitConv($target)" => target }.headOption getOrElse prefix

@@ -75,6 +75,7 @@ object LuaTest extends App {
     myMap.size
     myMap.asInstanceOf[{def AnotherThing: Int}].AnotherThing
 
+    val matched = "I have 2 questions for you".mmatch("(%d+) (%a+)").asInstanceOf[(String, String)]
     print("ok")
     iterate(pairs(myMap)).apply { (k, v) =>
       print(k)

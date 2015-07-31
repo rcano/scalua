@@ -7,6 +7,8 @@ object LuaStdLib {
 
   trait Iterator[R, State]
 
+  type Nuple = Any
+
   def print(any: Any): Unit = Predef.println(any)
   def setmetatable(m: Map[_, _], m2: Map[_, _]) = ???
   def require(r: String): Any = ???
@@ -71,13 +73,12 @@ object LuaStdLib {
     @extensionMethod
     def reverse(): String = ???
 
-    //TODO: in order to implement match I need support for ntuple
-//    @extensionMethod
-//    @renamed("match")
-//    def matches(pattern: String, index: Int): List[String] = ???
-//    @extensionMethod
-//    @renamed("match")
-//    def matches(pattern: String): List[String] = ???
+    @extensionMethod
+    @renamed("match")
+    def mmatch(pattern: String, index: Int): Nuple = ???
+    @extensionMethod
+    @renamed("match")
+    def mmatch(pattern: String): Nuple = ???
 
     @extensionMethod
     def format(args: Any*): String = ???
