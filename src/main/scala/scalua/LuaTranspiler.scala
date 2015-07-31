@@ -290,6 +290,11 @@ class LuaTranspiler[C <: Context](val context: C) {
 
   private def patternMatch(expr: Tree, cases: Seq[CaseDef]): LuaAst.LuaTree = {
     val No = LuaAst.NoTree
+    var freshNameCounter = 0
+    def nextName = {
+      freshNameCounter += 1
+      "x$" + freshNameCounter
+    }
     /**
      * helper method to parse cases. Each pattern receives the expression over which it operates, and returns
      * a LuaTree that represents the values boundm the LuaTree representing the condition to continue with this branch, and an optional LuaTree
@@ -308,11 +313,11 @@ class LuaTranspiler[C <: Context](val context: C) {
         val setup = if (setupStats.isEmpty) None else Some(LuaAst.Block(setupStats))
         (No, pats.map(_._1).reduceLeft((a, b) => LuaAst.InfixOperation(a, "or", b)), setup)
       case pq"$ref(..$pats)" =>
-        val patsWithIndex = pats.zipWithIndex
+        val patsWithName = pats.map(p => p -> nextName)
         val unapplyExpr = LuaAst.Invoke(Some(transform(ref)), "unapply", Seq(expr))
-        val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithIndex.map(e => "x$" + e._2), unapplyExpr), true)
+        val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), unapplyExpr), true)
 
-        val (binds, cond, setups) = patsWithIndex.map(t => pattern(LuaAst.Ref(None, s"x$$${t._2}"), t._1)).
+        val (binds, cond, setups) = patsWithName.map(t => pattern(LuaAst.Ref(None, t._2), t._1)).
         foldLeft[(Seq[LuaAst.LuaTree], LuaAst.LuaTree, Seq[LuaAst.LuaTree])]((Vector.empty, No, Vector.empty)) {
           case ((bindsAggr, No, setupAggr), (binds, cond, setup)) => (bindsAggr :+ binds, cond, setupAggr ++ setup)
           case ((bindsAggr, res, setupAggr), (binds, cond, setup)) => (bindsAggr :+ binds, LuaAst.InfixOperation(res, "and", cond), setupAggr ++ setup)
