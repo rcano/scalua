@@ -9,7 +9,7 @@ object PatternMatchTest extends App {
 
     val a = SomeClass("a", 42, null)
     (a: Any) match {
-      case SomeClass("b", 10, SomeClass("what now", 20, null)) => print("found it")
+      case SomeClass("b", 10, sm@SomeClass("what now", 20, null)) if sm.a != "b" => print("found it")
       case any: SomeClass => print("got any " + any)
       case any: String => print("got any " + any)
       case "someLiteral" => print("someLiteral")

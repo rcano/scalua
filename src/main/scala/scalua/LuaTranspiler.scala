@@ -300,41 +300,39 @@ class LuaTranspiler[C <: Context](val context: C) {
      * a LuaTree that represents the values boundm the LuaTree representing the condition to continue with this branch, and an optional LuaTree
      * that would be setup for the condition testing.
      */
-    def pattern(expr: LuaAst.LuaTree, pat: Tree): (LuaAst.LuaTree, LuaAst.LuaTree, Option[LuaAst.LuaTree]) = pat match {
-      case pq"_" => (No, LuaAst.Constant(true), None)
+    def pattern(expr: LuaAst.LuaTree, pat: Tree): (Option[LuaAst.LuaTree], LuaAst.LuaTree) = pat match {
+      case pq"_" => (None, LuaAst.Constant(true))
       case pq"$name @ $pat" =>
-        val (binds, cond, setup) = pattern(expr, pat)
-        (LuaAst.Block(Seq(LuaAst.Var(name.decodedName.toString, expr, true)).filterNot(No.==)), cond, setup)
-      case pq"_: $tpt" => (No, LuaAst.InfixOperation(LuaAst.Ref(Some(expr), "__className"), "==",
-                                                     LuaAst.Constant(tpt.symbol.asType.fullName)), None)
+        val (binds, cond) = pattern(expr, pat)
+        (Some(LuaAst.Block(Seq(LuaAst.Var(name.decodedName.toString, expr, true)).++(binds).filterNot(No.==))), cond)
+      case pq"_: $tpt" => (None, LuaAst.InfixOperation(LuaAst.Ref(Some(expr), "__className"), "==", LuaAst.Constant(tpt.symbol.asType.fullName)))
       case pq"$first | ..$rest" =>
-        val pats = (pattern(expr, first) +: rest.map(pattern(expr, _))).map(t => t._2 -> t._3)
-        val setupStats = pats.map(_._2).foldLeft[Seq[LuaAst.LuaTree]](Vector.empty)(_ ++ _)
-        val setup = if (setupStats.isEmpty) None else Some(LuaAst.Block(setupStats))
-        (No, pats.map(_._1).reduceLeft((a, b) => LuaAst.InfixOperation(a, "or", b)), setup)
+        val pats = (pattern(expr, first) +: rest.map(pattern(expr, _))) map (_._2)
+        (None, pats.reduceLeft((a, b) => LuaAst.InfixOperation(a, "or", b)))
       case pq"$ref(..$pats)" =>
         val patsWithName = pats.map(p => p -> nextName)
         val unapplyExpr = LuaAst.Invoke(Some(transform(ref)), "unapply", Seq(expr))
         val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), unapplyExpr), true)
 
-        val (binds, cond, setups) = patsWithName.map(t => pattern(LuaAst.Ref(None, t._2), t._1)).
-        foldLeft[(Seq[LuaAst.LuaTree], LuaAst.LuaTree, Seq[LuaAst.LuaTree])]((Vector.empty, No, Vector.empty)) {
-          case ((bindsAggr, No, setupAggr), (binds, cond, setup)) => (bindsAggr :+ binds, cond, setupAggr ++ setup)
-          case ((bindsAggr, res, setupAggr), (binds, cond, setup)) => (bindsAggr :+ binds, LuaAst.InfixOperation(res, "and", cond), setupAggr ++ setup)
+        val (binds, cond) = patsWithName.map(t => pattern(LuaAst.Ref(None, t._2), t._1)).
+        foldLeft[(Seq[LuaAst.LuaTree], LuaAst.LuaTree)]((Vector.empty, No)) {
+          case ((bindsAggr, No), (binds, cond)) => (bindsAggr ++ binds, cond)
+          case ((bindsAggr, res), (binds, cond)) => (bindsAggr ++ binds, LuaAst.InfixOperation(res, "and", cond))
         }
-        val setup = Some(LuaAst.Block(unapplyTuple +: setups))
-        (LuaAst.Block(binds.filterNot(No.==)), cond, setup)
-      case pq"$literal" => (No, LuaAst.InfixOperation(expr, "==", transform(literal)), None)
+        (Some(LuaAst.Block(unapplyTuple +: binds.filterNot(No.==))), cond)
+      case pq"$literal" => (None, LuaAst.InfixOperation(expr, "==", transform(literal)))
     }
 
     val luaExpr = transform(expr)
     cases.map { _case =>
-      val (binds, pat, setup) = pattern(luaExpr, _case.pat)
-      (setup, pat, LuaAst.Block(Seq(binds, transform(_case.body)).filterNot(No.==)))
+      val (binds, pat) = pattern(luaExpr, _case.pat)
+      println("guard: " + _case.guard)
+      val guard = if (_case.guard != EmptyTree) transform(_case.guard) else No
+      val cond = if (guard != No) LuaAst.InfixOperation(pat, "and", guard) else pat
+      (binds, cond, transform(_case.body))
     }.foldRight[LuaAst.LuaTree](LuaAst.Constant(LuaAst.nil)) {
       case ((None, cond, thenBranch), elseBranch) => LuaAst.IfThenElse(cond, thenBranch, elseBranch)
       case ((Some(setup), cond, thenBranch), elseBranch) => LuaAst.Block(Seq(setup, LuaAst.IfThenElse(cond, thenBranch, elseBranch)))
-
     }
   }
 
