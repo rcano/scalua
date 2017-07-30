@@ -4,7 +4,6 @@ import language.reflectiveCalls
 import Predef.ArrowAssoc
 
 object LuaTest extends App {
-  import scala.reflect.runtime.universe._
   import LuaStdLib._
 
   val someBlock = LuaMacro.transpile {

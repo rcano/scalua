@@ -7,7 +7,7 @@ object PatternMatchTest extends App {
   val res = LuaMacro.transpile {
     case class SomeClass(a: String, b: Int, nested: SomeClass)
 
-    val a = SomeClass("a", 42, null)
+    val a = SomeClass("a", 42, null) //todo fix case classes apply
     (a: Any) match {
       case SomeClass("b", 10, sm@SomeClass("what now", 20, null)) if sm.a != "b" => print("found it")
       case any: SomeClass => print("got any " + any)

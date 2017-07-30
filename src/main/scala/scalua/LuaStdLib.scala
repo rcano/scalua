@@ -1,6 +1,5 @@
 package scalua
 
-import language.dynamics
 import Predef.{ ??? }
 
 object LuaStdLib {
@@ -25,8 +24,8 @@ object LuaStdLib {
   object Map {
     def apply[K, V](entries: (K, V)*): Map[K, V] = new Map[K, V] {
       val map = collection.mutable.Map[K, V]()
-      def apply(k) = map.get(k)
-      def update(k, v) = map(k) = v
+      def apply(k: K) = map.get(k)
+      def update(k: K, v: V) = map(k) = v
       def size = map.size
     }
   }

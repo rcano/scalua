@@ -157,6 +157,7 @@ class LuaTranspiler[C <: Context](val context: C) {
       case Ident(name) =>
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
         else LuaAst.Ref(None, name.decodedName.toString)
+      case tt: TypeTree => transform(tt.original)
       case q"$clazz.this.$select" =>
         if (tree.tpe <:< typeOf[LuaAst.LuaTree]) LuaAst.StagedNode(tree)
         else {
@@ -312,7 +313,8 @@ class LuaTranspiler[C <: Context](val context: C) {
       case pq"$ref(..$pats)" =>
         val patsWithName = pats.map(p => p -> nextName)
         val unapplyExpr = LuaAst.Invoke(Some(transform(ref)), "unapply", Seq(expr))
-        val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), unapplyExpr), true)
+        val unapplyOpt = LuaAst.Var(LuaAst.Assign(nextName, unapplyExpr), true)
+        val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), LuaAst.Invoke(Some(LuaAst.Ref(None, unapplyOpt.assign.names.head)), "get", Seq.empty)), true)
 
         val (binds, cond) = patsWithName.map(t => pattern(LuaAst.Ref(None, t._2), t._1)).
         foldLeft[(Seq[LuaAst.LuaTree], LuaAst.LuaTree)]((Vector.empty, No)) {
@@ -336,14 +338,10 @@ class LuaTranspiler[C <: Context](val context: C) {
     }
   }
 
-  def transpile(tree: Tree): Tree = {
-    println(s"Processing\n$tree")
-    q"${transform(tree)}"
-  }
 
   implicit val liftableLuaTree = new Liftable[LuaAst.LuaTree] {
     implicit val t: Liftable[LuaAst.LuaTree] = this
-    def apply(node) = node match {
+    def apply(node: LuaAst.LuaTree) = node match {
       case LuaAst.NoTree => q"scalua.LuaAst.NoTree"
       case LuaAst.Constant(LuaAst.nil) => q"scalua.LuaAst.Constant(scalua.LuaAst.nil)"
       case LuaAst.Constant(n) => q"scalua.LuaAst.Constant(${Literal(Constant(n))})"
@@ -366,6 +364,10 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.MapLiteral(entries) => q"scalua.LuaAst.MapLiteral(Seq(..$entries))"
       case LuaAst.StagedNode(tree) => tree.asInstanceOf[Tree]
     }
+  }
+  def transpile(tree: Tree): Tree = {
+    println(s"Processing\n$tree")
+    q"${transform(tree)}"
   }
 }
 
