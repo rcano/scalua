@@ -1,6 +1,7 @@
 package scalua
 
 import Predef.{ ??? }
+import scala.annotation.unchecked.uncheckedVariance
 
 object LuaStdLib {
 
@@ -13,12 +14,12 @@ object LuaStdLib {
   def require(r: String): Any = ???
   def loadfile(f: String): () => Any = ???
   def loadstring(text: String): () => Any = ???
-  def ipairs[V](m: Map[Int, V]): Iterator[(Int, V), Unit] = ???
+  def ipairs[V](m: List[V]): Iterator[(Int, V), Unit] = ???
   def pairs[K, V](m: Map[K, V]): Iterator[(K, V), Unit] = ???
 
-  trait Map[K, V] {
+  trait Map[K, +V] {
     def apply(k: K): Option[V]
-    def update(k: K, v: V): Unit
+    def update(k: K, v: V@uncheckedVariance): Unit
     def size(): Int
   }
   object Map {
@@ -30,9 +31,11 @@ object LuaStdLib {
     }
   }
 
-
+  type List[+T] = Map[Int, T]
   def List[T](elems: T*): Map[Int, T] = ???
 
+  def splice[R](tee: LuaAst.LuaTree): R = ???
+  
   def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit): Unit = ???
   def iterate[R, State, F](iterator: Iterator[R, State], state: State = ???, init: State = ???)(implicit magnet: FunctionMagnet[R, F]): IterateApply[R, State, F] = ???
   sealed trait IterateApply[R, State, F] {
