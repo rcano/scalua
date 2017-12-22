@@ -23,3 +23,8 @@ class extensionMethod extends StaticAnnotation
  * Renames the annotated method when produced.
  */
 class renamed(value: String) extends StaticAnnotation
+
+/**
+ * Marks an object as provider of global definitions. This means that it's package and the object itself wont appear as prefixes
+ */
+class global extends StaticAnnotation
