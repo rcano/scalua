@@ -196,7 +196,7 @@ class LuaTranspiler[C <: Context](val context: C) {
             case _ => true
           })
 
-//        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
+        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
 
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
@@ -250,6 +250,10 @@ class LuaTranspiler[C <: Context](val context: C) {
           var adaptedInvocation = q"${adaptedPrefix}.${invokedMethod.name}(...${List(target) :: args})"
           adaptedInvocation = context.internal.setType(adaptedInvocation, invokedMethod.typeSignature)
           adaptedInvocation = context.internal.setSymbol(adaptedInvocation, invokedMethod)
+          
+          val invokeAnn = q"new _root_.scalua.invoke()"
+          invokeAnn.foreach(context.internal.setType(_, typeOf[invoke]))
+          context.internal.setAnnotations(adaptedInvocation.symbol, Annotation(invokeAnn))
           transform(adaptedInvocation)
           
         } else {
