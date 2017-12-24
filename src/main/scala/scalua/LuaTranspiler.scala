@@ -65,7 +65,7 @@ object LuaAst {
   case class IfThenElse(cond: LuaTree, thenBranch: LuaTree, elseBranch: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
       val thenStr = thenBranch.pprint(p.inc)
-      val elseStr = if (elseBranch != Constant(nil)) s"\n${p.currIndent}else\n" +  elseBranch.pprint(p.inc) else ""
+      val elseStr = if (elseBranch != NoTree) s"\n${p.currIndent}else\n" +  elseBranch.pprint(p.inc) else ""
       print"if $cond then\n$thenStr$elseStr\n" + print"end"
     }
   }
@@ -147,6 +147,7 @@ class LuaTranspiler[C <: Context](val context: C) {
   import context.universe._
   def transform(tree: Tree): LuaAst.LuaTree = try {
     tree match { // the order of the statements determine priority, needs to be handle with care. Incorrect order may trigger SOE
+      case Literal(Constant(())) => LuaAst.NoTree
       case Literal(Constant(l)) => LuaAst.Constant(if (l == (())) LuaAst.nil else l)
 
       case Block(stats, expr) => LuaAst.Block(((stats :+ expr).iterator map transform flatMap { //flatten nested blocks
