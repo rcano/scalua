@@ -182,9 +182,12 @@ class LuaTranspiler[C <: Context](val context: C) {
       case q"$prefix.asInstanceOf[$_]" => transform(prefix) //casting has no meaning to lua
       case q"$prefix: $tpt" => transform(prefix) //casting has no meaning to lua
       case q"$prefix.$method[..$tparams](...$args)" =>
+        //TODO document the logic of this method, for it is quite large
         val invokedMethod = prefix.symbol match {
           case s: MethodSymbol => prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
-          case other => prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
+          case other => 
+            if (prefix.tpe == null) println(s"DEBUG= prefix $prefix has null type")
+            prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
         }
         val methodName = method.decodedName.toString
         //attempt to identify default arguments passed
@@ -193,7 +196,7 @@ class LuaTranspiler[C <: Context](val context: C) {
             case _ => true
           })
 
-        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}")
+//        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
 
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
@@ -209,9 +212,8 @@ class LuaTranspiler[C <: Context](val context: C) {
           } else if (methodName == "splice") {
             LuaAst.StagedNode(args.head.head)
           } else LuaAst.Invoke(None, methodName, args.flatten map transform)
+          
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.IterateApply[_, _, _]]) != NoType) {
-          println("iterate's prefix: " + transform(prefix))
-          println("iterate's body: " + args)
           val LuaAst.Invoke(_, _, Seq(iterator, state, init, _)) = transform(prefix)
           val (params, body) = transform(args.head.head) match {
             case LuaAst.Function(params, body) => (params, body)
@@ -221,12 +223,14 @@ class LuaTranspiler[C <: Context](val context: C) {
                          if (!state.toString.contains("$default$")) Some(state) else None,
                          if (!init.toString.contains("$default$")) Some(init) else None,
                          body)
+          
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.Map[_, _]]) != NoType) {
-          method.encodedName.toString match {
+          methodName match {
             case "apply" => LuaAst.Ref(None, transform(prefix) + "[" + transform(args.head.head) + "]")
             case "update" => LuaAst.Var(transform(prefix) + "[" + transform(args.head.head) + "]", transform(args.head.tail.head), false)
             case "size" => LuaAst.UnaryOperation("#", transform(prefix))
           }
+          
         } else if (invokedMethod.owner == symbolOf[LuaStdLib.Map.type]) {
           LuaAst.MapLiteral(args.flatten.map {
               case q"$prefix.Predef.ArrowAssoc[$_]($a).->[$_]($b)" => (transform(a), transform(b))
@@ -237,13 +241,18 @@ class LuaTranspiler[C <: Context](val context: C) {
           if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
           else context.abort(tree.pos, s"Unsupported String api $invokedMethod")
+          
+          //extension methods via value classes
+        } else if (invokedMethod.owner.isImplicit && invokedMethod.owner.asType.toType <:< typeOf[AnyVal] && 
+          prefix.collect { case q"$implicitConv($target)" => target }.nonEmpty) {
+          val target = prefix.collect { case q"$implicitConv($target)" => target }.head
+          val adaptedPrefix = context.internal.setType(q"${invokedMethod.owner}", invokedMethod.owner.typeSignature)
+          var adaptedInvocation = q"${adaptedPrefix}.${invokedMethod.name}(...${List(target) :: args})"
+          adaptedInvocation = context.internal.setType(adaptedInvocation, invokedMethod.typeSignature)
+          adaptedInvocation = context.internal.setSymbol(adaptedInvocation, invokedMethod)
+          transform(adaptedInvocation)
+          
         } else {
-          
-          //check if the prefix is annotated with global, in which case we'll reprocess this without it
-          if (prefix.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) {
-            println(Console.CYAN + s"Prefix $prefix is global!" + Console.RESET)
-          }
-          
           val target: Option[LuaAst.LuaTree] = if (prefix.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) {
             None
           } else {
@@ -260,7 +269,8 @@ class LuaTranspiler[C <: Context](val context: C) {
               s
             case _ => methodName
           }
-          if (targetMethodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
+          
+          val functionCall = if (targetMethodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
             if (targetMethodName == "!=") LuaAst.InfixOperation(target.get, "~=", transform(args.head.head))
             else LuaAst.InfixOperation(target.get, targetMethodName, transform(args.head.head))
           } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined || invokedMethod.owner.isModuleClass) {
@@ -271,6 +281,14 @@ class LuaTranspiler[C <: Context](val context: C) {
             if (targetMethodName == "apply") LuaAst.Invoke(None, target.get.toString, args.flatten map transform) //TODO: using the prefix.toString is TERRIBLE, need to do something better here
             else LuaAst.Dispatch(target, targetMethodName, args.flatten map transform)
           }
+          
+          if (invokedMethod.isImplicit && invokedMethod.isSynthetic && invokedMethod.returnType.typeSymbol.isImplicit) {
+            functionCall match {
+              case i: LuaAst.Invoke => i.copy(sym = i.sym + "Implicit")
+              case d: LuaAst.Dispatch => d.copy(sym = d.sym + "Implicit")
+              case other => other
+            }
+          } else functionCall
         }
 
 
@@ -283,8 +301,14 @@ class LuaTranspiler[C <: Context](val context: C) {
 
       case q"if ($cond) $thenBranch else $elseBranch" => LuaAst.IfThenElse(transform(cond), transform(thenBranch), transform(elseBranch))
       case q"while ($cond) $expr" => LuaAst.While(transform(cond), transform(expr))
-      case q"$mods def $name[..$tparams](...$argss): $ret = $body" => LuaAst.Var(name.decodedName.toString, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)), mods.hasFlag(Flag.PRIVATE))
+        
+      case q"$mods def $name[..$tparams](...$argss): $ret = $body" =>
+        val variableName = if (mods.hasFlag(Flag.IMPLICIT) && mods.hasFlag(Flag.SYNTHETIC) && ret.symbol.isImplicit) name.decodedName.toString + "Implicit"
+        else name.decodedName.toString
+        LuaAst.Var(variableName, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), transform(body)), mods.hasFlag(Flag.PRIVATE))
+        
       case q"(..$args) => $body" => LuaAst.Function(args.map(_.name.decodedName.toString), transform(body))
+        
       case q"$mods class $tname[..$tparams](...$argss) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
         val flatArgs = argss.flatten
         val memberArgs = flatArgs.filter(!_.mods.hasFlag(Flag.LOCAL)).map(v => LuaAst.Var(v.name.decodedName.toString, LuaAst.Ref(None, v.name.decodedName.toString), false))
