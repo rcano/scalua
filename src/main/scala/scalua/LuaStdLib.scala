@@ -9,7 +9,7 @@ object LuaStdLib {
 
   type Nuple = Any
 
-  def print(any: Any): Unit = Predef.println(any)
+  def print(any: Any*): Unit = Predef.println(any)
   def setmetatable(m: Map[_, _], m2: Map[_, _]) = ???
   def require(r: String): Any = ???
   def loadfile(f: String): () => Any = ???
