@@ -115,10 +115,21 @@ object LuaAst {
         case s: Class => Block(Seq(s.copy(local = true), Var(s"self.${s.name}", Ref(None, s.name), false)))
         case other => other
       }
+      
+      val paramsToString = params.map(s => InfixOperation(Constant(s + "="), "..", Invoke(None, "tostring", Seq(Ref(None, s"v.$s")))): LuaTree).
+      reduceRightOption((a, b) => InfixOperation(a, ".. \",\" .. ", b))
+      
+      val  toString = Function(Seq("v"),
+                               paramsToString match {
+          case Some(paramsToString) => InfixOperation(InfixOperation(Constant(name + "("), "..", paramsToString), "..", Constant(")"))
+          case _ => Constant(name)
+        })
+      
       val ctor = Var(s"$name.new", Function("class" +: params, Block(Seq(
               Var("self", MapLiteral(Seq.empty), true),
               Assign("class.__index", Ref(None, "class")),
               Assign("class.__className", Constant((prefix ++ Seq(name)).mkString("."))),
+              Assign("class.__tostring", toString),
               Block(classMembers),
               Invoke(None, "setmetatable", Seq(Ref(None, "self"), Ref(None, "class")))
             ))), false)
@@ -197,7 +208,7 @@ class LuaTranspiler[C <: Context](val context: C) {
             case _ => true
           })
 
-        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
+//        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
 
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
@@ -245,16 +256,16 @@ class LuaTranspiler[C <: Context](val context: C) {
           
           //extension methods via value classes
         } else if (invokedMethod.owner.isImplicit && invokedMethod.owner.asType.toType <:< typeOf[AnyVal] && 
-          prefix.collect { case q"$implicitConv($target)" => target }.nonEmpty) {
+                   prefix.collect { case q"$implicitConv($target)" => target }.nonEmpty) {
           val target = prefix.collect { case q"$implicitConv($target)" => target }.head
           val adaptedPrefix = context.internal.setType(q"${invokedMethod.owner}", invokedMethod.owner.typeSignature)
           var adaptedInvocation = q"${adaptedPrefix}.${invokedMethod.name}(...${List(target) :: args})"
           adaptedInvocation = context.internal.setType(adaptedInvocation, invokedMethod.typeSignature)
           adaptedInvocation = context.internal.setSymbol(adaptedInvocation, invokedMethod)
           
-          val invokeAnn = q"new _root_.scalua.invoke()"
-          invokeAnn.foreach(context.internal.setType(_, typeOf[invoke]))
-          context.internal.setAnnotations(adaptedInvocation.symbol, Annotation(invokeAnn))
+//          val invokeAnn = q"new _root_.scalua.invoke()"
+//          invokeAnn.foreach(context.internal.setType(_, typeOf[invoke]))
+//          context.internal.setAnnotations(adaptedInvocation.symbol, Annotation(invokeAnn))
           transform(adaptedInvocation)
           
         } else {
