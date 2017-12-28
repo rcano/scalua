@@ -3,6 +3,7 @@ package scalua
 import Predef.{ ??? }
 import scala.annotation.unchecked.uncheckedVariance
 
+@global
 object LuaStdLib {
 
   trait Iterator[R, State]
@@ -29,6 +30,23 @@ object LuaStdLib {
       def update(k: K, v: V) = map(k) = v
       def size = map.size
     }
+  }
+  
+  @renamed("table")
+  object Table {
+    @invoke
+    def concat[K, V](t: Map[K, V], sep: String): String = ???
+    @invoke
+    def insert[K, V](t: Map[K, V], v: V): Map[K, V] = ???
+    @invoke
+    def remove[T](t: List[T], pos: Int): List[T] = ???
+    @invoke
+    @renamed("remove")
+    def removeLast[T](t: List[T]): List[T] = ???
+    @invoke
+    def sort[T](t: List[T]): Unit  = ???
+    @invoke
+    def sort[T](t: List[T], comparator: (T, T) => Boolean): Unit  = ???
   }
 
   type List[+T] = Map[Int, T]
