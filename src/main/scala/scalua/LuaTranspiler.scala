@@ -39,7 +39,7 @@ object LuaAst {
   object Assign { def apply(name: String, value: LuaTree) = new Assign(Seq(name), value) }
   case class Var(assign: Assign, local: Boolean) extends LuaTree { def pprint(implicit p: PPrinter) = print"${if (local) "local " else ""}" + assign.pprint.trim }
   object Var { def apply(name: String, value: LuaTree, local: Boolean) = new Var(Assign(Seq(name), value), local) }
-  case class Ref(prefix: Option[LuaTree], name: String) extends LuaTree { def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ".") + name}" }
+  case class Ref(prefix: Option[LuaTree], name: String) extends LuaTree { def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ".")}$name" }
   case class Block(stats: Seq[LuaTree]) extends LuaTree { def pprint(implicit p: PPrinter) = {
       stats.map(_.pprint).mkString("\n")
     }
@@ -47,14 +47,14 @@ object LuaAst {
   /**
    * AST node represting an instance method being invoked (with the colon operator)
    */
-  case class Dispatch(prefix: Option[LuaTree], sym: String, args: Seq[LuaTree]) extends LuaTree {
-    def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ":")}$sym(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
+  case class Dispatch(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
+    def pprint(implicit p: PPrinter) = print"${sym.prefix.fold("")(_ + ":")}${sym.name}(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
   }
   /**
    * AST node represeting a method invocation (with the dot operator)
    */
-  case class Invoke(prefix: Option[LuaTree], sym: String, args: Seq[LuaTree]) extends LuaTree {
-    def pprint(implicit p: PPrinter) = print"${prefix.fold("")(_ + ".")}$sym(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
+  case class Invoke(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
+    def pprint(implicit p: PPrinter) = sym.pprint + print"(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
   }
   case class InfixOperation(lhs: LuaTree, op: String, rhs: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = print"$lhs $op $rhs"
@@ -116,7 +116,7 @@ object LuaAst {
         case other => other
       }
       
-      val paramsToString = params.map(s => InfixOperation(Constant(s + "="), "..", Invoke(None, "tostring", Seq(Ref(None, s"v.$s")))): LuaTree).
+      val paramsToString = params.map(s => InfixOperation(Constant(s + "="), "..", Invoke(Ref(None, "tostring"), Seq(Ref(None, s"v.$s")))): LuaTree).
       reduceRightOption((a, b) => InfixOperation(a, ".. \",\" .. ", b))
       
       val  toString = Function(Seq("v"),
@@ -131,7 +131,7 @@ object LuaAst {
               Assign("class.__className", Constant((prefix ++ Seq(name)).mkString("."))),
               Assign("class.__tostring", toString),
               Block(classMembers),
-              Invoke(None, "setmetatable", Seq(Ref(None, "self"), Ref(None, "class")))
+              Invoke(Ref(None, "setmetatable"), Seq(Ref(None, "self"), Ref(None, "class")))
             ))), false)
 
       Block(Seq(Var(name, MapLiteral(Seq.empty), local), ctor)).pprint
@@ -141,7 +141,7 @@ object LuaAst {
     def pprint(implicit p: PPrinter) = {
       LuaAst.Block(Seq(
           LuaAst.Class(prefix, s"${name}_MODULE", Seq.empty, body, true),
-          LuaAst.Assign(name, LuaAst.Dispatch(Some(LuaAst.Ref(None, s"${name}_MODULE")), "new", Seq.empty)),
+          LuaAst.Assign(name, LuaAst.Dispatch(LuaAst.Ref(Some(LuaAst.Ref(None, s"${name}_MODULE")), "new"), Seq.empty)),
           LuaAst.Var(s"${name}_MODULE", LuaAst.Constant(LuaAst.nil), local)
         )).pprint
     }
@@ -174,21 +174,31 @@ class LuaTranspiler[C <: Context](val context: C) {
         }
 
       case Ident(name) =>
-        if (tree.tpe <:< typeOf[LuaAst.LuaTree]) unsplicedLuaTree(tree)
-        else LuaAst.Ref(None, name.decodedName.toString)
-      case tt: TypeTree => transform(tt.original)
-      case q"$clazz.this.$select" =>
-        if (tree.tpe <:< typeOf[LuaAst.LuaTree]) unsplicedLuaTree(tree)
+        if (tree.tpe <:< typeOf[LuaAst.LuaTree] && !(tree.tpe =:= definitions.NothingTpe)) unsplicedLuaTree(tree)
         else {
-          if (tree.symbol.asTerm.isParamAccessor && !tree.symbol.asTerm.isAccessor) LuaAst.Ref(None, select.decodedName.toString) //a pararm accessor does not need self, since its contextualized to the function
-          else LuaAst.Ref(None, "self." + select.decodedName)
+          if (tree.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) LuaAst.NoTree
+          else getRenamed(tree).fold(LuaAst.Ref(None, name.decodedName.toString))(s => LuaAst.Ref(None, s))
         }
+      case tt: TypeTree => transform(tt.original)
       case Select(ident, select) =>
-        if (tree.tpe <:< typeOf[LuaAst.LuaTree]) unsplicedLuaTree(tree)
+        if (tree.tpe <:< typeOf[LuaAst.LuaTree] && !(tree.tpe =:= definitions.NothingTpe)) unsplicedLuaTree(tree)
         else {
-          val selected = select.decodedName.toString
+          val selected = getRenamed(tree).getOrElse(select.decodedName.toString)
           if (selected == "unary_!") LuaAst.UnaryOperation("not ", transform(ident))
-          else LuaAst.Ref(Some(transform(ident)), selected)
+          else if (ident.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) LuaAst.Ref(None, selected)
+          else {
+            val prefix = transform(ident) match {
+              case LuaAst.NoTree => None
+              case other => Some(other)
+            }
+            LuaAst.Ref(prefix, selected)
+          }
+        }
+      case q"$clazz.this.$select" =>
+        if (tree.tpe <:< typeOf[LuaAst.LuaTree] && !(tree.tpe =:= definitions.NothingTpe)) unsplicedLuaTree(tree)
+        else {
+          if (tree.symbol.asTerm.isParamAccessor && !tree.symbol.asTerm.isAccessor) LuaAst.Ref(None, select.decodedName.toString) //a param accessor does not need self, since its contextualized to the function
+          else LuaAst.Ref(None, "self." + select.decodedName)
         }
 
       case q"$prefix.asInstanceOf[$_]" => transform(prefix) //casting has no meaning to lua
@@ -201,6 +211,10 @@ class LuaTranspiler[C <: Context](val context: C) {
             if (prefix.tpe == null) println(s"DEBUG= prefix $prefix has null type")
             prefix.tpe.member(method).alternatives.find(_.isMethod).get.asMethod
         }
+        val selectTree = q"$prefix.$method"
+        context.internal.setType(selectTree, invokedMethod.returnType)
+        context.internal.setSymbol(selectTree, invokedMethod)
+        lazy val methodRef = transform(selectTree).asInstanceOf[LuaAst.Ref]
         val methodName = method.decodedName.toString
         //attempt to identify default arguments passed
         val trueArgs = invokedMethod.paramLists.zip(args).map(t => t._1 zip t._2 filter {
@@ -208,7 +222,7 @@ class LuaTranspiler[C <: Context](val context: C) {
             case _ => true
           })
 
-//        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
+        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, decoded method $methodRef, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
 
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
@@ -223,10 +237,10 @@ class LuaTranspiler[C <: Context](val context: C) {
             LuaAst.MapLiteral(args.head.zipWithIndex.map { case (arg, i) => (LuaAst.Constant(i + 1), transform(arg)) })
           } else if (methodName == "splice") {
             LuaAst.StagedNode(args.head.head)
-          } else LuaAst.Invoke(None, methodName, args.flatten map transform)
+          } else LuaAst.Invoke(methodRef, args.flatten map transform)
           
         } else if (invokedMethod.owner.info.baseType(symbolOf[LuaStdLib.IterateApply[_, _, _]]) != NoType) {
-          val LuaAst.Invoke(_, _, Seq(iterator, state, init, _)) = transform(prefix)
+          val LuaAst.Invoke(_, Seq(iterator, state, init, _)) = transform(prefix)
           val (params, body) = transform(args.head.head) match {
             case LuaAst.Function(params, body) => (params, body)
             case LuaAst.Block(Seq(LuaAst.Function(params, body))) => (params, body)
@@ -269,47 +283,36 @@ class LuaTranspiler[C <: Context](val context: C) {
           transform(adaptedInvocation)
           
         } else {
-          val target: Option[LuaAst.LuaTree] = if (prefix.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) {
-            None
-          } else {
-            Some(transform(
-                if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[extensionMethod]).isDefined) {
-                  prefix.collect { case q"$implicitConv($target)" => target }.headOption getOrElse prefix
-                } else prefix
-              ))
-          }
+          val target: LuaAst.Ref = if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[extensionMethod]).isDefined) {
+            prefix.collect { case q"$implicitConv($target)" => LuaAst.Ref(Some(transform(target)), methodRef.name) }.headOption getOrElse methodRef
+          } else methodRef
           
-          val targetMethodName = invokedMethod.annotations.find(_.tree.tpe =:= typeOf[renamed]) match {
-            case Some(r) => 
-              val List(Literal(Constant(s: String))) = r.tree.children.tail
-              s
-            case _ => methodName
-          }
+          val targetMethodName = target.name
           
           val functionCall = if (targetMethodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
-            if (targetMethodName == "!=") LuaAst.InfixOperation(target.get, "~=", transform(args.head.head))
-            else LuaAst.InfixOperation(target.get, targetMethodName, transform(args.head.head))
+            if (targetMethodName == "!=") LuaAst.InfixOperation(target.prefix.get, "~=", transform(args.head.head))
+            else LuaAst.InfixOperation(target.prefix.get, targetMethodName, transform(args.head.head))
           } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invoke]).isDefined || invokedMethod.owner.isModuleClass) {
-            LuaAst.Invoke(target, targetMethodName, args.flatten map transform)
+            LuaAst.Invoke(target, args.flatten map transform)
           } else if (invokedMethod.annotations.find(_.tree.tpe =:= typeOf[invokeAsField]).isDefined && args.flatten.isEmpty) {
-            LuaAst.Ref(target, targetMethodName)
+            target
           } else {
-            if (targetMethodName == "apply") LuaAst.Invoke(None, target.get.toString, args.flatten map transform) //TODO: using the prefix.toString is TERRIBLE, need to do something better here
-            else LuaAst.Dispatch(target, targetMethodName, args.flatten map transform)
+            if (targetMethodName == "apply") LuaAst.Invoke(LuaAst.Ref(None, target.prefix.get.toString), args.flatten map transform) //TODO: using the prefix.toString is TERRIBLE, need to do something better here
+            else LuaAst.Dispatch(target, args.flatten map transform)
           }
           
           if (invokedMethod.isImplicit && invokedMethod.isSynthetic && invokedMethod.returnType.typeSymbol.isImplicit) {
             functionCall match {
-              case i: LuaAst.Invoke => i.copy(sym = i.sym + "Implicit")
-              case d: LuaAst.Dispatch => d.copy(sym = d.sym + "Implicit")
+              case i: LuaAst.Invoke => i.copy(sym = LuaAst.Ref(i.sym.prefix, i.sym.name + "Implicit"))
+              case d: LuaAst.Dispatch => d.copy(sym = LuaAst.Ref(d.sym.prefix, d.sym.name + "Implicit"))
               case other => other
             }
           } else functionCall
         }
 
 
-      case q"${method: TermName}[..$tparams](...$args)" => LuaAst.Invoke(None, method.decodedName.toString, args.flatten map transform)
-      case q"new $clazz[..$tparams](...$args)" => LuaAst.Dispatch(Some(transform(clazz)), "new", args.flatten map transform)
+      case q"${method: TermName}[..$tparams](...$args)" => LuaAst.Invoke(LuaAst.Ref(None, method.decodedName.toString), args.flatten map transform)
+      case q"new $clazz[..$tparams](...$args)" => LuaAst.Dispatch(LuaAst.Ref(Some(transform(clazz)), "new"), args.flatten map transform)
 
       case q"$mods var $name = $value" => varDef(tree, name.decodedName.toString, value, mods.hasFlag(Flag.PRIVATE))
       case q"$mods val $name = $value" => varDef(tree, name.decodedName.toString, value, mods.hasFlag(Flag.PRIVATE))
@@ -342,7 +345,15 @@ class LuaTranspiler[C <: Context](val context: C) {
   } catch {
     case util.control.NonFatal(e) => context.abort(tree.pos, s"Failed to process due to $e\n" + e.getStackTrace.take(10).mkString("\n"))
   }
-
+  /**
+   * produces a LuaAst.Ref based on the ident handling @global and @renamed annotations
+   */
+  private def getRenamed(tree: Tree): Option[String] = tree.symbol.annotations.find(_.tree.tpe =:= typeOf[renamed]) match {
+    case Some(renamed) => 
+      val List(Literal(Constant(s: String))) = renamed.tree.children.tail
+      Some(s)
+    case _ => None
+  }
   private def unsplicedLuaTree(tree: Tree) = context.abort(tree.pos, "LuaTree must be spliced using the method splice.")
   
   private def varDef(tree: Tree, name: String, value: Tree, local: Boolean): LuaAst.LuaTree = {
@@ -377,14 +388,14 @@ class LuaTranspiler[C <: Context](val context: C) {
         (None, pats.reduceLeft((a, b) => LuaAst.InfixOperation(a, "or", b)))
       case pq"$ref(..$pats)" =>
         val patsWithName = pats.map(p => p -> nextName)
-        val unapplyExpr = LuaAst.Invoke(Some(transform(ref)), "unapply", Seq(expr))
+        val unapplyExpr = LuaAst.Invoke(LuaAst.Ref(Some(transform(ref)), "unapply"), Seq(expr))
         val unapplyOpt = LuaAst.Var(LuaAst.Assign(nextName, unapplyExpr), true)
         //declare the extracted variables
         val unapplyTuple = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), LuaAst.Constant(LuaAst.nil)), true)
         val unapplyTupleInitialize = LuaAst.Block(Seq(
             LuaAst.IfThenElse(
-              cond = LuaAst.Invoke(Some(LuaAst.Ref(None, unapplyOpt.assign.names.head)), "isDefined", Seq.empty),
-              thenBranch = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), LuaAst.Invoke(Some(LuaAst.Ref(None, unapplyOpt.assign.names.head)), "get", Seq.empty)), true),
+              cond = LuaAst.Invoke(LuaAst.Ref(Some(LuaAst.Ref(None, unapplyOpt.assign.names.head)), "isDefined"), Seq.empty),
+              thenBranch = LuaAst.Var(LuaAst.Assign(patsWithName.map(e => e._2), LuaAst.Invoke(LuaAst.Ref(Some(LuaAst.Ref(None, unapplyOpt.assign.names.head)), "get"), Seq.empty)), true),
               elseBranch = LuaAst.Constant(LuaAst.nil))
           ))
 
@@ -422,8 +433,8 @@ class LuaTranspiler[C <: Context](val context: C) {
       case LuaAst.Var(a, l) => q"scalua.LuaAst.Var(${a: LuaAst.LuaTree}, $l)"
       case LuaAst.Ref(prefix, name) => q"scalua.LuaAst.Ref($prefix, $name)"
       case LuaAst.Block(stats) => q"scalua.LuaAst.Block(Seq(..$stats))"
-      case LuaAst.Dispatch(prefix, sym, args) => q"scalua.LuaAst.Dispatch($prefix, $sym, Seq(..$args))"
-      case LuaAst.Invoke(prefix, sym, args) => q"scalua.LuaAst.Invoke($prefix, $sym, Seq(..$args))"
+      case LuaAst.Dispatch(sym, args) => q"scalua.LuaAst.Dispatch(${sym: LuaAst.LuaTree}, Seq(..$args))"
+      case LuaAst.Invoke(sym, args) => q"scalua.LuaAst.Invoke(${sym: LuaAst.LuaTree}, Seq(..$args))"
       case LuaAst.InfixOperation(l, o, r) => q"scalua.LuaAst.InfixOperation($l, $o, $r)"
       case LuaAst.UnaryOperation(o, e) => q"scalua.LuaAst.UnaryOperation($o, $e)"
       case LuaAst.IfThenElse(cond, thenB, elseB) => q"scalua.LuaAst.IfThenElse($cond, $thenB, $elseB)"
