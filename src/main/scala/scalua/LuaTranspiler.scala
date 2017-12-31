@@ -339,13 +339,13 @@ class LuaTranspiler[C <: Context](val context: C) {
         val bodyNode = if(ret.tpe =:= definitions.UnitTpe) {
           LuaAst.Block(Seq(transform(body), LuaAst.NoTree))
         } else transform(body)
-        LuaAst.Var(variableName, LuaAst.Function(argss.flatten.map(_.name.decodedName.toString), bodyNode), mods.hasFlag(Flag.PRIVATE))
+        LuaAst.Var(variableName, LuaAst.Function(functionArguments(argss.flatten), bodyNode), mods.hasFlag(Flag.PRIVATE))
         
-      case q"(..$args) => $body" => LuaAst.Function(args.map(_.name.decodedName.toString), transform(body))
+      case q"(..$args) => $body" => LuaAst.Function(functionArguments(args), transform(body))
         
       case q"$mods class $tname[..$tparams](...$argss) extends { ..$earlydefns } with ..$parents { $self => ..$stats }" =>
         val flatArgs = argss.flatten
-        val memberArgs = flatArgs.filter(!_.mods.hasFlag(Flag.LOCAL)).map(v => LuaAst.Var(v.name.decodedName.toString, LuaAst.Ref(None, v.name.decodedName.toString), false))
+        val memberArgs = flatArgs.filter(!_.mods.hasFlag(Flag.LOCAL)).flatMap(v => functionArguments(Seq(v)).map(v => LuaAst.Var(v, LuaAst.Ref(None, v), false)))
         val prefix = Some(tree.symbol.asClass.fullName.split("\\.").init.mkString(".")).filter(_.nonEmpty)
         val clazz = getRenamed(tree) getOrElse tname.decodedName.toString
         LuaAst.Class(prefix, clazz, flatArgs.map(_.name.decodedName.toString), LuaAst.Block(memberArgs ++ (stats map transform)), mods.hasFlag(Flag.PRIVATE))
@@ -373,6 +373,15 @@ class LuaTranspiler[C <: Context](val context: C) {
   private def luaModuleName(name: Name): String = name.decodedName.toString + "_MODULE"
   private def shouldTreatAsModule(symbol: Symbol) = symbol.isModule || (symbol.isImplicit && symbol.isType && symbol.asType.toType <:< typeOf[AnyVal])
   private def unsplicedLuaTree(tree: Tree) = context.abort(tree.pos, "LuaTree must be spliced using the method splice.")
+  
+  private def functionArguments(args: Seq[ValDef]): Seq[String] = {
+    args.flatMap { arg =>
+      definitions.TupleClass.seq.zipWithIndex.find(_._1 == arg.symbol.info.typeSymbol) match {
+        case Some((_, idx)) => Seq.tabulate(idx + 1)(i => s"${arg.name}_${i + 1}")
+        case _ => Seq(arg.name.decodedName.toString)
+      }
+    }
+  }
   
   private def varDef(tree: Tree, name: String, value: Tree, local: Boolean): LuaAst.LuaTree = {
     definitions.TupleClass.seq.zipWithIndex.find(_._1 == tree.symbol.info.typeSymbol) match {
