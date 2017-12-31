@@ -161,7 +161,7 @@ object LuaAst {
 class LuaTranspiler[C <: Context](val context: C) {
   import context.universe._
   
-  val TuplesArity: Map[Symbol, Int] = definitions.TupleClass.seq.zipWithIndex.toMap
+  val TuplesArity: Map[Symbol, Int] = definitions.TupleClass.seq.zipWithIndex.map(e => (e._1, e._2 + 1)).toMap
   def transform(tree: Tree): LuaAst.LuaTree = try {
     tree match { // the order of the statements determine priority, needs to be handle with care. Incorrect order may trigger SOE
       case Literal(Constant(())) => LuaAst.NoTree
@@ -183,7 +183,9 @@ class LuaTranspiler[C <: Context](val context: C) {
         if (tree.tpe <:< typeOf[LuaAst.LuaTree] && !(tree.tpe =:= definitions.NothingTpe)) unsplicedLuaTree(tree)
         else {
           if (tree.symbol.annotations.find(_.tree.tpe =:= typeOf[global]).isDefined) LuaAst.NoTree
-          else getRenamed(tree) match {
+          else if (TuplesArity.contains(tree.symbol.info.typeSymbol)) {
+            LuaAst.Tuple(Vector.tabulate(TuplesArity(tree.symbol.info.typeSymbol))(i => LuaAst.Ref(None, s"${name.decodedName}_${i + 1}")))
+          } else getRenamed(tree) match {
             case Some(s) => LuaAst.Ref(None, s)
             case _ => LuaAst.Ref(None, if (shouldTreatAsModule(tree.symbol)) luaModuleName(name) else name.decodedName.toString)
           }
@@ -203,7 +205,9 @@ class LuaTranspiler[C <: Context](val context: C) {
               case LuaAst.NoTree => None
               case other => Some(other)
             }
-            LuaAst.Ref(prefix, selected)
+            if (TuplesArity.contains(tree.symbol.info.typeSymbol)) 
+              LuaAst.Tuple(Vector.tabulate(TuplesArity(tree.symbol.info.typeSymbol))(i => LuaAst.Ref(prefix, s"${select.decodedName}_${i + 1}")))
+            else LuaAst.Ref(prefix, selected)
           }
         }
       case q"$clazz.this.$select" =>
@@ -382,7 +386,7 @@ class LuaTranspiler[C <: Context](val context: C) {
   private def functionArguments(args: Seq[ValDef]): Seq[String] = {
     args.flatMap { arg =>
       TuplesArity.get(arg.symbol.info.typeSymbol) match {
-        case Some(idx) => Seq.tabulate(idx + 1)(i => s"${arg.name}_${i + 1}")
+        case Some(arity) => Vector.tabulate(arity)(i => s"${arg.name}_${i + 1}")
         case _ => Seq(arg.name.decodedName.toString)
       }
     }
@@ -390,9 +394,9 @@ class LuaTranspiler[C <: Context](val context: C) {
   
   private def varDef(tree: Tree, name: String, value: Tree, local: Boolean): LuaAst.LuaTree = {
     TuplesArity.get(tree.symbol.info.typeSymbol) match {
-      case Some(idx) =>
+      case Some(arity) =>
         val q"(..$args)" = value
-        LuaAst.Var(LuaAst.Assign(Seq.tabulate(idx + 1)(i => s"${name}_${i + 1}"), LuaAst.Tuple(args map transform)), local)
+        LuaAst.Var(LuaAst.Assign(Vector.tabulate(arity)(i => s"${name}_${i + 1}"), LuaAst.Tuple(args map transform)), local)
       case _ => LuaAst.Var(name, transform(value), local)
     }
   }
