@@ -53,6 +53,7 @@ object LuaStdLib {
   def List[T](elems: T*): Map[Int, T] = ???
 
   def splice[R](tee: LuaAst.LuaTree): R = ???
+  def inlineLua[R](script: String): R = ???
   
   def cfor(from: Int, to: Int, step: Int = 1)(f: Int => Unit): Unit = ???
   def iterate[R, State, F](iterator: Iterator[R, State], state: State = ???, init: State = ???)(implicit magnet: FunctionMagnet[R, F]): IterateApply[R, State, F] = ???
