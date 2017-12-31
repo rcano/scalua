@@ -160,6 +160,8 @@ object LuaAst {
 
 class LuaTranspiler[C <: Context](val context: C) {
   import context.universe._
+  
+  val TuplesArity: Map[Symbol, Int] = definitions.TupleClass.seq.zipWithIndex.toMap
   def transform(tree: Tree): LuaAst.LuaTree = try {
     tree match { // the order of the statements determine priority, needs to be handle with care. Incorrect order may trigger SOE
       case Literal(Constant(())) => LuaAst.NoTree
@@ -171,7 +173,7 @@ class LuaTranspiler[C <: Context](val context: C) {
               case other => List(other)
             }).toSeq)
 
-      case q"$tuple.$field" if definitions.TupleClass.seq.exists(_ == tree.symbol.owner) && field.encodedName.toString.matches("_\\d+") =>
+      case q"$tuple.$field" if TuplesArity.get(tree.symbol.owner).isDefined && field.encodedName.toString.matches("_\\d+") =>
         tuple match {
           case q"$pref.$t" => LuaAst.Ref(Some(transform(pref)), t.toString + field.encodedName)
           case q"$t" => LuaAst.Ref(None, t.toString + field.encodedName)
@@ -232,7 +234,7 @@ class LuaTranspiler[C <: Context](val context: C) {
             case _ => true
           })
 
-//        println(s"Prefix: $prefix, method: $method, invokedMethod: $invokedMethod, decoded method $methodRef, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
+//        println(s"Prefix: $prefix, method, invokedMethod: $invokedMethod, decoded method $methodRef, annotations ${invokedMethod.annotations}, is value class ${invokedMethod.owner.isImplicit}, ${invokedMethod.owner.asType}, ${invokedMethod.owner.asType.toType <:< typeOf[AnyVal]}")
 
         if (invokedMethod.owner == symbolOf[LuaStdLib.type]) {
           if (methodName == "cfor") {
@@ -279,6 +281,9 @@ class LuaTranspiler[C <: Context](val context: C) {
           if (methodName == "+" ) LuaAst.InfixOperation(transform(prefix), "..", transform(args.head.head))
           else if (methodName == "length") LuaAst.UnaryOperation("#", transform(prefix))
           else context.abort(tree.pos, s"Unsupported String api $invokedMethod")
+          
+        } else if (TuplesArity.contains(invokedMethod.owner.companion)) {
+          LuaAst.Tuple(args.head.map(transform))
           
           //extension methods via value classes
         } else if (invokedMethod.owner.isImplicit && invokedMethod.owner.asType.toType <:< typeOf[AnyVal] && 
@@ -376,16 +381,16 @@ class LuaTranspiler[C <: Context](val context: C) {
   
   private def functionArguments(args: Seq[ValDef]): Seq[String] = {
     args.flatMap { arg =>
-      definitions.TupleClass.seq.zipWithIndex.find(_._1 == arg.symbol.info.typeSymbol) match {
-        case Some((_, idx)) => Seq.tabulate(idx + 1)(i => s"${arg.name}_${i + 1}")
+      TuplesArity.get(arg.symbol.info.typeSymbol) match {
+        case Some(idx) => Seq.tabulate(idx + 1)(i => s"${arg.name}_${i + 1}")
         case _ => Seq(arg.name.decodedName.toString)
       }
     }
   }
   
   private def varDef(tree: Tree, name: String, value: Tree, local: Boolean): LuaAst.LuaTree = {
-    definitions.TupleClass.seq.zipWithIndex.find(_._1 == tree.symbol.info.typeSymbol) match {
-      case Some((_, idx)) =>
+    TuplesArity.get(tree.symbol.info.typeSymbol) match {
+      case Some(idx) =>
         val q"(..$args)" = value
         LuaAst.Var(LuaAst.Assign(Seq.tabulate(idx + 1)(i => s"${name}_${i + 1}"), LuaAst.Tuple(args map transform)), local)
       case _ => LuaAst.Var(name, transform(value), local)
