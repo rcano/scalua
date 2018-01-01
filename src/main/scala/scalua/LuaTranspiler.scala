@@ -57,7 +57,7 @@ object LuaAst {
    * AST node represeting a method invocation (with the dot operator)
    */
   case class Invoke(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
-    def pprint(implicit p: PPrinter) = sym.pprint + print"(${args.mkString(", ")})"
+    def pprint(implicit p: PPrinter) = sym.pprint + s"(${args.mkString(", ")})"
   }
   case class InfixOperation(lhs: LuaTree, op: String, rhs: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = print"$lhs $op $rhs"
@@ -86,7 +86,7 @@ object LuaAst {
           case other => print"return " + other.pprint.trim
         }
       }
-      print"function (${args.mkString(",")})\n$bodyStr\n" + print"end"
+      print"function (${args.mkString(",")})" + s"\n$bodyStr\n" + print"end"
     }
   }
   case class For(iteratorName: String, from: LuaTree, to: LuaTree, step: LuaTree, code: LuaTree) extends LuaTree {
