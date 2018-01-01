@@ -7,7 +7,7 @@ import scala.reflect.macros.blackbox.Context
 
 object LuaAst {
   case class PPrinter(depth: Int = 0) {
-    val currIndent = "  " * depth
+    private[this] val currIndent = "  " * depth
     def pprint(str: String) = currIndent + str.replace("\n", "\n" + currIndent)
     def inc = new PPrinter(depth + 1)
   }
@@ -51,13 +51,13 @@ object LuaAst {
    * AST node represting an instance method being invoked (with the colon operator)
    */
   case class Dispatch(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
-    def pprint(implicit p: PPrinter) = print"${sym.prefix.fold("")(_ + ":")}${sym.name}(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
+    def pprint(implicit p: PPrinter) = print"${sym.prefix.fold("")(_ + ":")}${sym.name}(${args.mkString(", ")})"
   }
   /**
    * AST node represeting a method invocation (with the dot operator)
    */
   case class Invoke(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
-    def pprint(implicit p: PPrinter) = sym.pprint + print"(${args.mkString(", ").replace("\n", "\n" + p.currIndent)})"
+    def pprint(implicit p: PPrinter) = sym.pprint + print"(${args.mkString(", ")})"
   }
   case class InfixOperation(lhs: LuaTree, op: String, rhs: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = print"$lhs $op $rhs"
@@ -67,9 +67,9 @@ object LuaAst {
   }
   case class IfThenElse(cond: LuaTree, thenBranch: LuaTree, elseBranch: LuaTree) extends LuaTree {
     def pprint(implicit p: PPrinter) = {
-      val thenStr = thenBranch.pprint(p.inc)
-      val elseStr = if (elseBranch != NoTree) s"\n${p.currIndent}else\n" +  elseBranch.pprint(p.inc) else ""
-      print"if $cond then\n$thenStr$elseStr\n" + print"end"
+      val thenStr = thenBranch.pprint
+      val elseStr = if (elseBranch != NoTree) s"\nelse\n" +  elseBranch.pprint else ""
+      print"if $cond then\n$thenStr$elseStr\nend"
     }
   }
   case class While(cond: LuaTree, expr: LuaTree) extends LuaTree { def pprint(implicit p: PPrinter) = s"while $cond do\n${expr.pprint(p.inc)}\nend" }
@@ -406,7 +406,7 @@ class LuaTranspiler[C <: Context](val context: C) {
     var freshNameCounter = 0
     def nextName = {
       freshNameCounter += 1
-      "x$" + freshNameCounter
+      "__x_" + freshNameCounter
     }
     /**
      * helper method to parse cases. Each pattern receives the expression over which it operates, and returns
