@@ -2,13 +2,58 @@ package scalua
 
 import language.reflectiveCalls
 import Predef.ArrowAssoc
+import scala.util.chaining.*
 
-object LuaTest extends App {
+class MyNumber(private val thingy: Int) extends AnyVal {
+  def +(other: MyNumber): MyNumber = MyNumber(thingy + other.thingy)
+}
+
+@main def LuaTest = {
   import LuaStdLib._
 
+  // val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
+  // val a, b = MyNumber(3)
+  // TestMacros.debugMethod(
+  //   a + b
+  // )
+
   val someBlock = LuaMacro.transpile {
-    print("hello".sub(2,3) * 3)
+    object foo {
+      val hi = 34
+
+      object bar {
+        def thisIsNotFun = "what the hell"
+
+        class CreateMe() {
+          def hahah(s: String) = s + thisIsNotFun
+        }
+      }
+    }
+    print("the gall " + foo.hi)
+    // 1 + 2 + 3
+    print("attempt two")
+    val poo = Poroto()
+    class Poroto()
+
+    val someString = "someString"
+    val arraylist = require[java.util.ArrayList[String]]("somaaa")
+
+    // val Seq(a) = Seq(1,2,3)
+
+    (1: Any) match {
+      case _ => 1
+      case "hey" => 2
+      case name @ "pororo" => 3
+      case thing: String => 4
+      case 1 | 2 => 5
+      case `someString` => "pretty"
+      case Some(1) | None => 6
+    }
+    // "result" match {
+    //   case "1" =>
+    // }
   }
+  someBlock.pprint(using new LuaAst.PPrinter(0)) pipe Predef.println
 
   val tr = LuaMacro.transpile {
     var hello = "world"
@@ -38,50 +83,10 @@ object LuaTest extends App {
 
     while (!true) hello = "true"
 
-    class SomeClassHere(a: Int, val b: Int) {
-      val c = a * b
-      val tuple = (a, b, c)
-      print("The value of a * b is " + c)
-      def getB() = b
-
-      object inner {
-        val v = 42
-      }
-    }
-    val i = new SomeClassHere(5, 6)
-    print(i.b)
-    print(i.c)
-    print(i.tuple._2)
-    print("i.getB is " + i.getB)
-    print("inner.v = " + i.inner.v)
-    print(i.__className)
-
-    object SomeObject {
-      def tryMe() = "yeah"
-      val someConstant = 42
-    }
-    print(SomeObject.someConstant)
-    print(SomeObject.tryMe())
-
-    someBlock
-
-    cfor(1, 100)(print)
-    cfor(1, 100, "10".length)(print)
-
     val myMap = Map(1 -> "ichi", 2 -> "ni", 3 -> "san")
     myMap(2)
     myMap(10) = "jyu"
-    myMap.size
-    myMap.asInstanceOf[{def AnotherThing: Int}].AnotherThing
-
-    val matched = "I have 2 questions for you".mmatch("(%d+) (%a+)").asInstanceOf[(String, String)]
-    print("ok")
-    iterate(pairs(myMap)).apply { (k, v) =>
-      print(k)
-      print(v)
-    }
-
-    List(1, "a", myMap)
+    myMap.size()
   }
   print("Result:\n" + tr.pprint(new LuaAst.PPrinter(0)))
 }

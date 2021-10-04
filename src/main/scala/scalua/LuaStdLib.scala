@@ -8,11 +8,9 @@ object LuaStdLib {
 
   trait Iterator[R, State]
 
-  type Nuple = Any
-
   def print(any: Any*): Unit = Predef.println(any)
   def setmetatable(m: Map[_, _], m2: Map[_, _]) = ???
-  def require(r: String): Any = ???
+  def require[Module](r: String): Module = ???
   def loadfile(f: String): () => Any = ???
   def loadstring(text: String): () => Any = ???
   def ipairs[V](m: List[V]): Iterator[(Int, V), Unit] = ???
@@ -28,7 +26,7 @@ object LuaStdLib {
       val map = collection.mutable.Map[K, V]()
       def apply(k: K) = map.get(k)
       def update(k: K, v: V) = map(k) = v
-      def size = map.size
+      def size() = map.size
     }
   }
   
@@ -73,7 +71,7 @@ object LuaStdLib {
 
   implicit class AnyLib(val a: Any) extends AnyVal {
     @extensionMethod @invokeAsField
-    def __className(): String = ???
+    def __className: String = ???
   }
 
   implicit class StringLib(val s: String) extends AnyVal {
@@ -96,10 +94,10 @@ object LuaStdLib {
 
     @extensionMethod
     @renamed("match")
-    def mmatch(pattern: String, index: Int): Nuple = ???
+    def mmatch(pattern: String, index: Int): Tuple = ???
     @extensionMethod
     @renamed("match")
-    def mmatch(pattern: String): Nuple = ???
+    def mmatch(pattern: String): Tuple = ???
 
     @extensionMethod
     def format(args: Any*): String = ???

@@ -2,17 +2,14 @@ name := "scalua"
 
 inThisBuild(Seq(
   organization := "scalua",
-  scalaVersion := "2.12.4",
+  scalaVersion := "3.1.0-RC2",
   fork := true,
   outputStrategy := Some(StdoutOutput),
-  scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Yinfer-argument-types", "-Yno-predef", "-Yno-adapted-args", "-Xlint", "-Ypartial-unification", "-opt:_", "-opt-warnings:_", "-Ywarn-extra-implicit", "-Ywarn-inaccessible", "-Ywarn-infer-any", "-Ywarn-nullary-override", "-Ywarn-nullary-unit", "-Ywarn-numeric-widen"),
-  scalacOptions in (Compile, console) --= Seq("-Ywarn-unused:_", "-opt:_", "-Xlint")
+  scalacOptions ++= Seq("-deprecation", "-unchecked", "-Yno-predef"),
 ))
 
 
 libraryDependencies ++= Seq(
-  "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  "org.scala-lang.modules" %% "scala-java8-compat" % "0.8.0"
 )
 
 lazy val scalua = Project("scalua", file("."))
