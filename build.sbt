@@ -2,7 +2,7 @@ name := "scalua"
 
 inThisBuild(Seq(
   organization := "scalua",
-  scalaVersion := "3.1.0-RC2",
+  scalaVersion := "3.1.0-RC3",
   fork := true,
   outputStrategy := Some(StdoutOutput),
   scalacOptions ++= Seq("-deprecation", "-unchecked", "-Yno-predef"),

@@ -87,6 +87,7 @@ class MyNumber(private val thingy: Int) extends AnyVal {
     myMap(2)
     myMap(10) = "jyu"
     myMap.size()
+
   }
   print("Result:\n" + tr.pprint(new LuaAst.PPrinter(0)))
 }

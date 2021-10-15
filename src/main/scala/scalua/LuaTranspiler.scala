@@ -39,70 +39,88 @@ object LuaAst {
   sealed trait LuaTree {
     def pprint(implicit p: PPrinter): String
     override def toString = pprint(PPrinter.indent0)
+    def toExpr: LuaExpr
   }
+  sealed trait LuaExpr extends LuaTree {
+    def toExpr = this
+  }
+  sealed trait LuaStat extends LuaTree {
+    def toExpr: LuaExpr = this match {
+      case f: Function => LuaInlined(s"($f)()")
+      case _: (Block | IfThenElse) => Function(Seq(), this).toExpr
+      case _ => throw new IllegalStateException(s"Statement $this cannot be turned to expression")
+    }
+  }
+
   case object nil {
     def pprint(implicit p: PPrinter) = print"nil"
   }
-  case class Constant(c: Any) extends LuaTree {
+  case class Constant(c: Any) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = c match
       case s: String => print""""${s.replace("\"", "\\\"")}""""
       case null => print"nil"
       case other => p.pprint(String valueOf other)
   }
-  case class LuaInlined(script: String) extends LuaTree {
+  case class LuaInlined(script: String) extends LuaTree, LuaExpr, LuaStat {
     def pprint(implicit p: PPrinter) = p.pprint(script)
+    override def toExpr = this
   }
-  case class Tuple(values: Seq[LuaTree]) extends LuaTree {
+  case class Tuple(values: Seq[LuaTree]) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = p.pprint(values.map(_.toString).mkString(", "))
   }
-  case class MapLiteral(entries: Seq[(LuaTree, LuaTree)]) extends LuaTree {
+  case class MapLiteral(entries: Seq[(LuaTree, LuaTree)]) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = {
       val entriesStr = entries.map(e => s"[${e._1}] = ${e._2}").mkString(", ")
       print"{${entriesStr}}"
     }
   }
-  case class Assign(names: Seq[String], value: LuaTree) extends LuaTree {
+  case class Ident private (value: String) { override def toString = value }
+  object Ident:
+    def apply(name: String): Ident = new Ident(name.replace("$", "_"))
+    given Conversion[String, Ident] = apply
+    given Conversion[Ident, String] = _.value
+  case class Assign(names: Seq[Ident], value: LuaTree) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = p.pprint(s"${names.mkString(", ")} = $value")
   }
-  object Assign { def apply(name: String, value: LuaTree) = new Assign(Seq(name), value) }
-  case class Var(assign: Assign, local: Boolean) extends LuaTree {
+  object Assign { def apply(name: Ident, value: LuaTree) = new Assign(Seq(name), value) }
+  case class Var(assign: Assign, local: Boolean) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = p.pprint(s"${if (local) "local " else ""}$assign")
   }
-  object Var { def apply(name: String, value: LuaTree, local: Boolean) = new Var(Assign(Seq(name), value), local) }
-  case class Ref(prefix: Option[LuaTree], name: String) extends LuaTree {
+  object Var { def apply(name: Ident, value: LuaTree, local: Boolean) = new Var(Assign(Seq(name), value), local) }
+  case class Ref(prefix: Option[LuaExpr], name: Ident) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = p.pprint(prefix.fold("")(p => s"$p.") + name)
   }
-  case class Block(stats: Seq[LuaTree]) extends LuaTree { def pprint(implicit p: PPrinter) = stats.map(_.pprint).mkString("\n") }
+  case class Block(stats: Seq[LuaTree]) extends LuaTree, LuaStat { def pprint(implicit p: PPrinter) = stats.map(_.pprint).mkString("\n") }
 
   /** AST node represting an instance method being invoked (with the colon operator)
     */
-  case class Dispatch(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
+  case class Dispatch(sym: Ref, args: Seq[LuaTree]) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = p.pprint(sym.prefix.fold("")(p => s"$p:") + sym.name + s"(${args.mkString(", ")})")
   }
 
   /** AST node represeting a method invocation (with the dot operator)
     */
-  case class Invoke(sym: Ref, args: Seq[LuaTree]) extends LuaTree {
+  case class Invoke(sym: LuaExpr, args: Seq[LuaTree]) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = sym.pprint + s"(${args.mkString(", ")})"
   }
-  case class InfixOperation(lhs: LuaTree, op: String, rhs: LuaTree) extends LuaTree {
+  case class InfixOperation(lhs: LuaExpr, op: String, rhs: LuaExpr) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = print"$lhs $op $rhs"
   }
-  case class UnaryOperation(op: String, expr: LuaTree) extends LuaTree {
+  case class UnaryOperation(op: String, expr: LuaExpr) extends LuaTree, LuaExpr {
     def pprint(implicit p: PPrinter) = print"$op$expr"
   }
-  case class IfThenElse(cond: LuaTree, thenBranch: LuaTree, elseBranch: LuaTree) extends LuaTree {
+  case class IfThenElse(cond: LuaExpr, thenBranch: LuaTree, elseBranch: LuaTree) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = {
       var lines = Vector(s"if $cond then", thenBranch.pprint(PPrinter.indent1))
-      if (elseBranch != NoTree) lines ++= Vector("else", elseBranch.pprint(PPrinter.indent1))
+      if (elseBranch != NoTree && elseBranch != Constant(nil)) lines ++= Vector("else", elseBranch.pprint(PPrinter.indent1))
       lines :+= "end"
       p.pprint(lines: _*)
     }
   }
-  case class While(cond: LuaTree, expr: LuaTree) extends LuaTree {
+  case class While(cond: LuaExpr, expr: LuaTree) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = p.pprint(s"while $cond do", expr.pprint(PPrinter.indent1), "end")
   }
-  case class Function(args: Seq[String], body: LuaTree) extends LuaTree {
+  case class Function(args: Seq[Ident], body: LuaTree) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = {
       val bodyLines = body match {
         case Block(sts) =>
@@ -112,16 +130,24 @@ object LuaAst {
               case other => other
             }
             .map(_.pprint(PPrinter.indent1))
-            .toVector :+ PPrinter.indent1.pprint("return " + sts.last)
-        case other => Vector(PPrinter.indent1.pprint("return " + other))
+            .toVector :+ returnStat(sts.last).pprint(PPrinter.indent1)
+        case other => Vector(returnStat(other).pprint(PPrinter.indent1))
       }
       p.pprint(s"function (${args.mkString(",")})" +: bodyLines :+ "end": _*)
+
+    }
+    private def returnStat(stat: LuaTree): LuaTree = stat match {
+      case IfThenElse(cond, thenB, elseB) => IfThenElse(cond, returnStat(thenB), returnStat(elseB))
+      case Block(sts) => Block(sts.init :+ returnStat(sts.last))
+      case other => LuaInlined(s"return $other")
     }
   }
-  case class For(iteratorName: String, from: LuaTree, to: LuaTree, step: LuaTree, code: LuaTree) extends LuaTree {
+  case class For(iteratorName: Ident, from: LuaExpr, to: LuaExpr, step: LuaTree, code: LuaTree) extends LuaTree, LuaStat {
     def pprint(implicit p: PPrinter) = p.pprint(s"for $iteratorName = $from, $to, $step do", code.pprint(PPrinter.indent1), "end")
   }
-  case class Iterate(vars: Seq[String], iterator: LuaTree, state: Option[LuaTree], init: Option[LuaTree], code: LuaTree) extends LuaTree {
+  case class Iterate(vars: Seq[Ident], iterator: LuaTree, state: Option[LuaTree], init: Option[LuaTree], code: LuaTree)
+      extends LuaTree,
+        LuaStat {
     def pprint(implicit p: PPrinter) = {
       p.pprint(
         s"for ${vars.mkString(", ")} in " + (Some(iterator) ++ state ++ init).mkString(", ") + "do",
@@ -130,32 +156,32 @@ object LuaAst {
       )
     }
   }
-  sealed trait Template extends LuaTree {
+  sealed trait Template extends LuaTree, LuaStat {
     def prefix: Option[String]
-    def name: String
+    def name: Ident
     def fqdn: String
     def body: Block
     def local: Boolean
   }
-  case class Class(prefix: Option[String], name: String, fqdn: String, params: Seq[String], body: Block, local: Boolean) extends Template {
+  case class Class(prefix: Option[String], name: Ident, fqdn: String, params: Seq[Ident], body: Block, local: Boolean) extends Template {
     def pprint(implicit p: PPrinter) = {
       val classMembers = body.stats.map {
-        case Var(Assign(names, f: Function), _) => Var(Assign(names.map("self." + _), f.copy(args = "self" +: f.args)), false)
-        case Var(Assign(names, assignment), _) => Var(Assign(names.map("self." + _), assignment), false)
+        case Var(Assign(names, f: Function), _) => Var(Assign(names.map[Ident]("self." + _), f.copy(args = "self" +: f.args)), false)
+        case Var(Assign(names, assignment), _) => Var(Assign(names.map[Ident]("self." + _), assignment), false)
         case s: Singleton => Block(Seq(s.copy(local = true), Var(s"self.${s.name}", Ref(None, s.name), false)))
         case s: Class => Block(Seq(s.copy(local = true), Var(s"self.${s.name}", Ref(None, s.name), false)))
         case other => other
       }
 
       val paramsToString = params
-        .map(s => InfixOperation(Constant(s + "="), "..", Invoke(Ref(None, "tostring"), Seq(Ref(None, s"v.$s")))): LuaTree)
+        .map(s => InfixOperation(Constant(s + "="), "..", Invoke(Ref(None, "tostring"), Seq(Ref(None, s"v.$s")))))
         .reduceRightOption((a, b) => InfixOperation(a, ".. \",\" .. ", b))
 
       val toString = Function(
         Seq("v"),
         paramsToString match {
           case Some(paramsToString) => InfixOperation(InfixOperation(Constant(name + "("), "..", paramsToString), "..", Constant(")"))
-          case _ => Constant(name)
+          case _ => Constant(s"$name")
         }
       )
       val ctor = Var(
@@ -179,7 +205,7 @@ object LuaAst {
       Block(Seq(Var(name, MapLiteral(Seq.empty), local), ctor)).pprint
     }
   }
-  case class Singleton(prefix: Option[String], name: String, fqdn: String, body: Block, local: Boolean) extends Template {
+  case class Singleton(prefix: Option[String], name: Ident, fqdn: String, body: Block, local: Boolean) extends Template {
     def pprint(implicit p: PPrinter) = {
       LuaAst
         .Block(
@@ -193,11 +219,13 @@ object LuaAst {
         .pprint
     }
   }
-  case class StagedNode(tree: Expr[LuaTree]) extends LuaTree {
+  case class StagedNode(tree: Expr[LuaTree]) extends LuaTree, LuaStat, LuaExpr {
     def pprint(implicit p: PPrinter) = ???
+    override def toExpr = this
   }
-  case object NoTree extends LuaTree {
+  case object NoTree extends LuaTree, LuaStat, LuaExpr {
     def pprint(implicit p: PPrinter) = ""
+    override def toExpr = this
   }
 }
 
@@ -232,7 +260,7 @@ class LuaTranspiler(using val q: Quotes) {
 
       case Select(pref, field) if defn.isTupleClass(pref.symbol.maybeOwner) && field.matches("_\\d+") =>
         pref match {
-          case Select(pref, t) => LuaAst.Ref(Some(transform(pref)), t + field)
+          case Select(pref, t) => LuaAst.Ref(Some(transform(pref).toExpr), t + field)
           case Ident(t) => LuaAst.Ref(None, t + field)
         }
 
@@ -245,7 +273,7 @@ class LuaTranspiler(using val q: Quotes) {
           } else
             getRenamed(i) match {
               case Some(s) => LuaAst.Ref(None, s)
-              case _ => LuaAst.Ref(None, if (shouldTreatAsModule(i.symbol, i.tpe)) luaModuleName(name) else name)
+              case _ => LuaAst.Ref(None, if (shouldTreatAsModule(i)) luaModuleName(name) else name)
             }
         }
       // case tt: TypeTree => transform(tt.original)
@@ -254,7 +282,7 @@ class LuaTranspiler(using val q: Quotes) {
         else {
           if (tree.symbol.flags.is(Flags.ParamAccessor) && !tree.symbol.flags.is(Flags.FieldAccessor | Flags.CaseAccessor))
             LuaAst.Ref(None, select) //a param accessor does not need self, since its contextualized to the function
-          else LuaAst.Ref(Some(transform(tree.qualifier)), select)
+          else LuaAst.Ref(Some(transform(tree.qualifier).toExpr), select)
         }
 
       case Select(New(typeRef), "<init>") =>
@@ -269,22 +297,30 @@ class LuaTranspiler(using val q: Quotes) {
         else {
           val selected = getRenamed(tree) match {
             case Some(s) => s
-            case _ => if (shouldTreatAsModule(tree.symbol, tree.tpe)) luaModuleName(select) else select
+            case _ => if (shouldTreatAsModule(tree)) luaModuleName(select) else select
           }
-          if (selected == "unary_!") LuaAst.UnaryOperation("not ", transform(qual))
+          if (selected == "unary_!") LuaAst.UnaryOperation("not ", transform(qual).toExpr)
           else if (qual.symbol.hasAnnotation(globalAnnotSym)) LuaAst.Ref(None, selected)
           else if (defn.isTupleClass(tree.tpe.typeSymbol)) {
-            val prefix = Option(transform(qual)).filterNot(_ == LuaAst.NoTree)
+            val prefix = Option(transform(qual).toExpr).filterNot(_ == LuaAst.NoTree)
             LuaAst.Tuple(Vector.tabulate(TuplesArity(tree.tpe.typeSymbol))(i => LuaAst.Ref(prefix, s"${select}_${i + 1}")))
           } else if (defn.isTupleClass(tree.symbol.maybeOwner) && select.matches("_\\d+")) {
             transform(qual).asInstanceOf[LuaAst.Tuple].values(select.drop(1).toInt - 1)
-          } else LuaAst.Ref(Option(transform(qual)).filterNot(_ == LuaAst.NoTree), selected)
+          } else {
+            // must carefully detect references to no arg methods, because those are still generated as methods in the classes and need to be called like so
+            val ref = LuaAst.Ref(Option(transform(qual).toExpr).filterNot(_ == LuaAst.NoTree), selected)
+            if (tree.symbol.isDefDef && tree.symbol.paramSymss.isEmpty && !tree.symbol.maybeOwner.flags.is(Flags.Module))
+              LuaAst.Dispatch(ref, Seq())
+            else ref
+          }
         }
 
       case This(clazz) => LuaAst.Ref(None, "self")
       case NamedArg(_, expr) => transform(expr)
 
-      case TypeApply(Select(pref, "$asInstanceOf$"), _) => transform(pref) //casting has no meaning to lua
+      case TypeApply(Select(pref, "asInstanceOf" | "$asInstanceOf$"), _) => transform(pref) //casting has no meaning to lua
+      case TypeApply(m @ Select(pref, "isInstanceOf"), tpt) if m.symbol.maybeOwner == defn.AnyClass =>
+        isInstanceOfCheck(transform(pref).toExpr, tpt.head)
       case TypeApply(pref, _) => transform(pref) //types have no meaning to lua
       case Typed(prefix, _) => transform(prefix) //abscribing has no meaning to lua
 
@@ -299,14 +335,15 @@ class LuaTranspiler(using val q: Quotes) {
           case Typed(Repeated(args, _), _) => args
           case other => List(other)
         })
-        // println(s"""|$func
-        //             |$argss
-        //             |${func.symbol} - ${func.symbol.owner}
-        //             |===================================""".stripMargin)
+        println(s"""|$func
+                    |$argss
+                    |${func.symbol} - ${func.symbol.owner}
+                    |===================================""".stripMargin)
 
         //TODO document the logic of this method, for it is quite large
 
         val methodName = func.symbol.name
+        lazy val funcOwnerTpe = func.symbol.owner.tree.asInstanceOf[TypeTree].tpe
         // only use this when you know the function has a prefix
         lazy val Select(funcPrefix, _) = func
 
@@ -339,8 +376,8 @@ class LuaTranspiler(using val q: Quotes) {
               }: @unchecked
               LuaAst.For(
                 params.head,
-                transform(from),
-                transform(to),
+                transform(from).toExpr,
+                transform(to).toExpr,
                 if (trueArgs.head.size < argss.head.size) LuaAst.Constant(1) else transform(step),
                 body
               )
@@ -354,7 +391,6 @@ class LuaTranspiler(using val q: Quotes) {
               LuaAst.Invoke(transform(func).asInstanceOf[LuaAst.Ref], argss.flatten map transform)
           }
 
-          // TODO: this overriding symbol logic is wrong for sure
         } else if (func.symbol.overridingSymbol(TypeRepr.of[LuaStdLib.IterateApply[_, _, _]].typeSymbol) != Symbol.noSymbol) {
           val LuaAst.Invoke(_, Seq(iterator, state, init, _)) = transform(funcPrefix)
           val (params, body) = transform(argss.head.head) match {
@@ -374,7 +410,7 @@ class LuaTranspiler(using val q: Quotes) {
             case "apply" => LuaAst.Ref(None, transform(funcPrefix).toString + "[" + transform(argss.head.head) + "]")
             case "update" =>
               LuaAst.Var(transform(funcPrefix).toString + "[" + transform(argss.head.head) + "]", transform(argss.head.tail.head), false)
-            case "size" => LuaAst.UnaryOperation("#", transform(funcPrefix))
+            case "size" => LuaAst.UnaryOperation("#", transform(funcPrefix).toExpr)
           }
 
         } else if (func.symbol.owner == TypeRepr.of[LuaStdLib.Map.type].typeSymbol) {
@@ -384,13 +420,26 @@ class LuaTranspiler(using val q: Quotes) {
           })
 
         } else if (func.symbol.owner == defn.StringClass) {
-          if (methodName == "+") LuaAst.InfixOperation(transform(funcPrefix), "..", transform(argss.head.head))
-          else if (methodName == "length") LuaAst.UnaryOperation("#", transform(funcPrefix))
+          if (methodName == "+") LuaAst.InfixOperation(transform(funcPrefix).toExpr, "..", transform(argss.head.head).toExpr)
+          else if (methodName == "length") LuaAst.UnaryOperation("#", transform(funcPrefix).toExpr)
           else {
             report.error(s"Unsupported String api $func", tree.pos)
             LuaAst.NoTree
           }
 
+        } else if (func.symbol.owner == defn.BooleanClass && methodName.matches(raw"&&|\|\|")) {
+          LuaAst.InfixOperation(transform(funcPrefix).toExpr, if methodName == "&&" then "and" else "or", transform(argss.head.head).toExpr)
+        } else if (
+          (func.symbol.owner == defn.AnyRefClass && methodName == "eq") ||
+          (func.symbol.owner == defn.ObjectClass && methodName == "eq") || (func.symbol.owner == defn.AnyClass && methodName == "equals")
+        ) {
+          LuaAst.InfixOperation(transform(funcPrefix).toExpr, "==", transform(argss.head.head).toExpr)
+        } else if (
+          (func.symbol.owner == defn.AnyRefClass && methodName == "ne") || (func.symbol.owner == defn.ObjectClass && methodName == "ne")
+        ) {
+          LuaAst.InfixOperation(transform(funcPrefix).toExpr, "~=", transform(argss.head.head).toExpr)
+        } else if (methodName == "toString" && func.symbol.flags.is(Flags.Override)) {
+          LuaAst.Dispatch(LuaAst.Ref(Some(transform(funcPrefix).toExpr), "__tostring"), Seq())
         } else if (TupleFactories(func.symbol)) {
           LuaAst.Tuple(argss.head.map(transform))
 
@@ -408,7 +457,7 @@ class LuaTranspiler(using val q: Quotes) {
           //extension methods via value classes
         } else if (
           func.symbol.owner.flags.is(Flags.Implicit) &&
-          func.symbol.owner.tree.asInstanceOf[TypeTree].tpe <:< TypeRepr.of[AnyVal] &&
+          funcOwnerTpe <:< TypeRepr.of[AnyVal] &&
           implicitClassConversionOpt.isDefined
         ) {
           val (implicitFunc, arg) = implicitClassConversionOpt.get
@@ -418,7 +467,7 @@ class LuaTranspiler(using val q: Quotes) {
           val newPrefix = Select(Typed(tripleQuestionMark, implicitClassType), func.symbol)
           val transformed = transform(newPrefix.appliedToArgss(argss)).asInstanceOf[LuaAst.Dispatch]
 
-          LuaAst.Dispatch(LuaAst.Ref(Some(transform(arg)), transformed.sym.name), transformed.args)
+          LuaAst.Dispatch(LuaAst.Ref(Some(transform(arg).toExpr), transformed.sym.name), transformed.args)
         } else {
           val target: LuaAst.Ref = func.symbol
             .getAnnotation(extensionMethodAnnotSym)
@@ -428,14 +477,14 @@ class LuaTranspiler(using val q: Quotes) {
           val targetMethodName = target.name
 
           val functionCall = if (targetMethodName matches "[+-[*]/%^<>]|~=|[!<>=]=") {
-            if (targetMethodName == "!=") LuaAst.InfixOperation(target.prefix.get, "~=", transform(argss.head.head))
-            else LuaAst.InfixOperation(target.prefix.get, targetMethodName, transform(argss.head.head))
-          } else if (func.symbol.hasAnnotation(invokeAnnotSym) || func.symbol.owner.flags.is(Flags.Module)) {
+            if (targetMethodName.value == "!=") LuaAst.InfixOperation(target.prefix.get, "~=", transform(argss.head.head).toExpr)
+            else LuaAst.InfixOperation(target.prefix.get, targetMethodName, transform(argss.head.head).toExpr)
+          } else if (func.symbol.hasAnnotation(invokeAnnotSym)) {
             LuaAst.Invoke(target, argss.flatten map transform)
           } else if (func.symbol.hasAnnotation(invokeAsFieldAnnotSym) && argss.flatten.isEmpty) {
             target
           } else {
-            if (targetMethodName == "apply")
+            if (targetMethodName.value == "apply" && funcOwnerTpe.isFunctionType)
               LuaAst.Invoke(
                 LuaAst.Ref(None, target.prefix.get.toString),
                 argss.flatten map transform
@@ -448,8 +497,8 @@ class LuaTranspiler(using val q: Quotes) {
             func.symbol.tree.asInstanceOf[DefDef].returnTpt.symbol.flags.is(Flags.Implicit)
           ) {
             functionCall match {
-              case i: LuaAst.Invoke => i.copy(sym = LuaAst.Ref(i.sym.prefix, i.sym.name + "Implicit"))
-              case d: LuaAst.Dispatch => d.copy(sym = LuaAst.Ref(d.sym.prefix, d.sym.name + "Implicit"))
+              case i @ LuaAst.Invoke(sym: LuaAst.Ref, _) => i.copy(sym = LuaAst.Ref(sym.prefix, s"${sym.name}Implicit"))
+              case d: LuaAst.Dispatch => d.copy(sym = LuaAst.Ref(d.sym.prefix, s"${d.sym.name}Implicit"))
               case other => other
             }
           } else functionCall
@@ -457,25 +506,25 @@ class LuaTranspiler(using val q: Quotes) {
 
       case vd @ ValDef(name, tpt, Some(rhs)) => varDef(vd, name, tpt.tpe, rhs, vd.symbol.flags.is(Flags.Private | Flags.PrivateLocal))
 
-      case ValDef(_, _, None) => LuaAst.NoTree // nothing to do with abstract members or non initialized fields in a class, since lua is dynamic
+      case ValDef(_, _, None) =>
+        LuaAst.NoTree // nothing to do with abstract members or non initialized fields in a class, since lua is dynamic
 
       case Assign(ident, value) => LuaAst.Assign(transform(ident).toString, transform(value))
 
-      case If(cond, thenBranch, elseBranch) => LuaAst.IfThenElse(transform(cond), transform(thenBranch), transform(elseBranch))
-      case While(cond, expr) => LuaAst.While(transform(cond), transform(expr))
+      case If(cond, thenBranch, elseBranch) => LuaAst.IfThenElse(transform(cond).toExpr, transform(thenBranch), transform(elseBranch))
+      case While(cond, expr) => LuaAst.While(transform(cond).toExpr, transform(expr))
 
-      case Import(prefix, selectors) =>
-        report.error(
-          """Scala imports are not supported as lua behaves significantly different. Instead, use the LuaStdLib function require and assign the result to a variable.""",
-          tree.pos
-        )
-        LuaAst.NoTree
+      case Import(prefix, selectors) => LuaAst.NoTree
 
       case _: TypeDef => LuaAst.NoTree // no types in lua
 
       // special case case class generated hashCode method to discard it. Lua doesn't do hashcode, they hardcore
-      case dd @ DefDef("hashCode", _, retTpe, _) if dd.symbol.flags.is(Flags.Synthetic) && (retTpe.tpe <:< TypeRepr.of[Int]) => LuaAst.NoTree 
-      case dd @ DefDef("toString", _, retTpe, _) if dd.symbol.flags.is(Flags.Synthetic) && (retTpe.tpe <:< TypeRepr.of[String]) => LuaAst.NoTree 
+      case dd @ DefDef("hashCode", _, retTpe, _) if dd.symbol.flags.is(Flags.Synthetic) && (retTpe.tpe <:< TypeRepr.of[Int]) =>
+        LuaAst.NoTree
+      case dd @ DefDef("toString", _, retTpe, _) if dd.symbol.flags.is(Flags.Synthetic) && (retTpe.tpe <:< TypeRepr.of[String]) =>
+        LuaAst.NoTree
+      case dd @ DefDef("canEqual", _, retTpe, _) if dd.symbol.flags.is(Flags.Synthetic) && (retTpe.tpe <:< TypeRepr.of[Boolean]) =>
+        LuaAst.NoTree
 
       case defdef: DefDef if defdef.rhs.isDefined =>
         val variableName =
@@ -512,7 +561,7 @@ class LuaTranspiler(using val q: Quotes) {
       // object singletons
       case Block(List(vd: ValDef, cd: ClassDef), Literal(UnitConstant()))
           if vd.tpt.tpe.typeSymbol == cd.symbol && cd.symbol.flags.is(Flags.Module) =>
-        val clazz = luaModuleName(getRenamed(cd).getOrElse(cd.name))
+        val clazz = luaModuleName(getRenamed(cd).getOrElse(vd.name))
         val prefix = Some(cd.symbol.name.split("\\.").init.mkString(".")).filter(_.nonEmpty)
         val fqdn = cd.symbol.fullName
         val body = transform(Block(cd.body, Literal(UnitConstant()))) match
@@ -582,14 +631,14 @@ class LuaTranspiler(using val q: Quotes) {
     case _ => None
   }
   private def luaModuleName(name: String): String = name.replace("$", "_") + "_MODULE"
-  private def shouldTreatAsModule(symbol: Symbol, tpe: TypeRepr) =
-    symbol.flags.is(Flags.Module) || (symbol.flags.is(Flags.Implicit) && symbol.isType && tpe <:< TypeRepr.of[AnyVal])
+  private def shouldTreatAsModule(tree: Term) =
+    tree.symbol.flags.is(Flags.Module) || (tree.symbol.flags.is(Flags.Implicit) && tree.symbol.isType && tree.tpe <:< TypeRepr.of[AnyVal])
   private def unsplicedLuaTree(tree: Tree) = {
     report.error("LuaTree must be spliced using the method splice.", tree.pos)
     LuaAst.NoTree
   }
 
-  private def functionArguments(args: Seq[ValDef]): Seq[String] = {
+  private def functionArguments(args: Seq[ValDef]): Seq[LuaAst.Ident] = {
     args.flatMap { arg =>
       TuplesArity.get(arg.symbol) match {
         case Some(arity) => Vector.tabulate(arity)(i => s"${arg.name}_${i + 1}")
@@ -603,12 +652,43 @@ class LuaTranspiler(using val q: Quotes) {
     TuplesArity.get(tpe.typeSymbol) match {
       case Some(arity) =>
         transform(value) match {
-          case t: LuaAst.Tuple => LuaAst.Var(LuaAst.Assign(Vector.tabulate(arity)(i => s"${name}_${i + 1}"), t), local)
-          case other => LuaAst.Var(LuaAst.Assign(Vector.tabulate(arity)(i => s"${name}_${i + 1}"), other), local)
+          case t: LuaAst.Tuple => LuaAst.Var(LuaAst.Assign(Vector.tabulate(arity)(i => LuaAst.Ident(s"${name}_${i + 1}")), t), local)
+          case other => LuaAst.Var(LuaAst.Assign(Vector.tabulate(arity)(i => LuaAst.Ident(s"${name}_${i + 1}")), other.toExpr), local)
         }
 
-      case _ => LuaAst.Var(name, transform(value), local)
+      case _ => LuaAst.Var(name, transform(value).toExpr, local)
     }
+  }
+
+  private def isInstanceOfCheck(expr: LuaAst.LuaExpr, tpt: TypeTree): LuaAst.LuaTree = {
+    if tpt.tpe =:= TypeRepr.of[Byte] || tpt.tpe =:= TypeRepr.of[Short] || tpt.tpe =:= TypeRepr.of[Int]
+      || tpt.tpe =:= TypeRepr.of[Long] || tpt.tpe =:= TypeRepr.of[Float]
+    then
+      report.errorAndAbort(
+        s"Cannot instance check in runtime against ${tpt.tpe.show(using Printer.TypeReprCode)}. Lua only supports the number type",
+        tpt.pos
+      )
+    else if tpt.tpe =:= TypeRepr.of[Char] then
+      report.errorAndAbort(s"Cannot instance check in runtime against Chars. Lua only supports the string type", tpt.pos)
+    else if tpt.tpe =:= TypeRepr.of[Double] || tpt.tpe =:= TypeRepr.of[BigDecimal] || tpt.tpe =:= TypeRepr.of[Number] then
+      LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("number"))
+    else if tpt.tpe =:= TypeRepr.of[String] then
+      LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("string"))
+    else if tpt.tpe =:= TypeRepr.of[Boolean] then
+      LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("boolean"))
+    else if tpt.tpe <:< TypeRepr.of[LuaStdLib.Map[?, ?]] then
+      LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("table"))
+    else if tpt.tpe =:= TypeRepr.of[LuaStdLib.List[?]] then
+      report.errorAndAbort(s"Cannot instance check in runtime against Lists. Lua implements lists as tables", tpt.pos)
+    else if tpt.tpe =:= TypeRepr.of[LuaStdLib.Map] then
+      LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("table"))
+    else
+      LuaAst.InfixOperation(
+        LuaAst.InfixOperation(LuaAst.Invoke(LuaAst.Ref(None, "type"), Seq(expr)), "==", LuaAst.Constant("table")),
+        "and",
+        LuaAst.InfixOperation(LuaAst.Ref(Some(expr), "__className"), "==", LuaAst.Constant(tpt.symbol.fullName))
+      )
+
   }
 
   object ImplicitClassConversion:
@@ -616,10 +696,11 @@ class LuaTranspiler(using val q: Quotes) {
       case Select(Apply(implicitConv, List(arg)), _) if implicitConv.symbol.flags is Flags.Implicit => Some(implicitConv -> arg)
       case _ => None
 
+
+  private var freshNameCounter = 0
   private def patternMatch(expr: Tree, cases: Seq[CaseDef]): LuaAst.LuaTree = {
     val No = LuaAst.NoTree
-    var freshNameCounter = 0
-    def nextName = {
+    def nextName: LuaAst.Ident = {
       freshNameCounter += 1
       "__x_" + freshNameCounter
     }
@@ -628,24 +709,24 @@ class LuaTranspiler(using val q: Quotes) {
       * values bound the LuaTree representing the condition to continue with this branch, and an optional LuaTree that would be setup for
       * the condition testing.
       */
-    def pattern(expr: LuaAst.LuaTree, pat: Tree): (Option[LuaAst.LuaTree], LuaAst.LuaTree) = pat match {
-      case Ident("_") => (None, LuaAst.Constant(true))
+    def pattern(expr: LuaAst.LuaExpr, pat: Tree): (Option[LuaAst.LuaTree], LuaAst.LuaTree) = pat match {
+      case Wildcard() => (None, LuaAst.Constant(true))
 
-      case l: Literal => (None, LuaAst.InfixOperation(expr, "==", transform(l)))
-      case r: Ref => (None, LuaAst.InfixOperation(expr, "==", transform(r)))
+      case l: Literal => (None, LuaAst.InfixOperation(expr, "==", transform(l).toExpr))
+      case r: Ref => (None, LuaAst.InfixOperation(expr, "==", transform(r).toExpr))
 
       case Bind(name, pat) =>
         val (binds, cond) = pattern(expr, pat)
         (Some(LuaAst.Block(Seq(LuaAst.Var(name, expr, true)).++(binds).filterNot(No.==))), cond)
 
-      case Typed(Ident("_"), tpt) => (None, LuaAst.InfixOperation(LuaAst.Ref(Some(expr), "__className"), "==", LuaAst.Constant(tpt.symbol.fullName)))
+      case Typed(Wildcard(), tpt) => (None, isInstanceOfCheck(expr, tpt))
 
       case Alternatives(List(first, rest*)) =>
         val pats = (pattern(expr, first) +: rest.map(pattern(expr, _))) map (_._2)
-        (None, pats.reduceLeft((a, b) => LuaAst.InfixOperation(a, "or", b)))
+        (None, pats.reduceLeft((a, b) => LuaAst.InfixOperation(a.toExpr, "or", b.toExpr)))
 
       case TypedOrTest(p1, _) => pattern(expr, p1)
-        
+
       case Unapply(ref, implicits, pats) =>
         val patsWithName = pats.map(p => p -> nextName)
         val unapplyExpr = LuaAst.Invoke(transform(ref).asInstanceOf[LuaAst.Ref], Seq(expr))
@@ -671,7 +752,7 @@ class LuaTranspiler(using val q: Quotes) {
           .map(t => pattern(LuaAst.Ref(None, t._2), t._1))
           .foldLeft[(Seq[LuaAst.LuaTree], LuaAst.LuaTree)]((Vector.empty, No)) {
             case ((bindsAggr, No), (binds, cond)) => (bindsAggr ++ binds, cond)
-            case ((bindsAggr, res), (binds, cond)) => (bindsAggr ++ binds, LuaAst.InfixOperation(res, "and", cond))
+            case ((bindsAggr, res), (binds, cond)) => (bindsAggr ++ binds, LuaAst.InfixOperation(res.toExpr, "and", cond.toExpr))
           }
         (Some(LuaAst.Block(unapplyOpt +: unapplyTuple +: unapplyTupleInitialize +: binds.filterNot(No.==))), cond)
 
@@ -686,12 +767,12 @@ class LuaTranspiler(using val q: Quotes) {
         val (binds, pat) = pattern(luaExpr, _case.pattern)
         // println("guard: " + _case.guard)
         val guard = _case.guard.map(transform(_)) getOrElse No
-        val cond = if (guard != No) LuaAst.InfixOperation(pat, "and", guard) else pat
+        val cond = if (guard != No) LuaAst.InfixOperation(pat.toExpr, "and", guard.toExpr) else pat
         (binds, cond, transform(_case.rhs))
       }
       .foldRight[LuaAst.LuaTree](LuaAst.Constant(LuaAst.nil)) {
-        case ((None, cond, thenBranch), elseBranch) => LuaAst.IfThenElse(cond, thenBranch, elseBranch)
-        case ((Some(setup), cond, thenBranch), elseBranch) => LuaAst.Block(Seq(setup, LuaAst.IfThenElse(cond, thenBranch, elseBranch)))
+        case ((None, cond, thenBranch), elseBranch) => LuaAst.IfThenElse(cond.toExpr, thenBranch, elseBranch)
+        case ((Some(setup), cond, thenBranch), elseBranch) => LuaAst.Block(Seq(setup, LuaAst.IfThenElse(cond.toExpr, thenBranch, elseBranch)))
       }
     LuaAst.Block(List(capturedExpr, luaCases))
   }
@@ -700,7 +781,11 @@ class LuaTranspiler(using val q: Quotes) {
     def unapply(t: Term) = Some(t.asExpr)
   }
 
+  given ToExpr[LuaAst.Ident] with {
+    def apply(i: LuaAst.Ident)(using Quotes) = '{ LuaAst.Ident(${ Expr(i.value) }) }
+  }
   given ToExpr[LuaAst.LuaTree] with {
+    given ToExpr[LuaAst.LuaExpr] = this.asInstanceOf
     val constantToExpr: ToExpr[Any] = new ToExpr[Any] {
       def apply(c: Any)(using Quotes) = c match {
         case n: (java.lang.Byte | java.lang.Short | java.lang.Integer | java.lang.Long) => Expr(n.longValue)
@@ -721,7 +806,7 @@ class LuaTranspiler(using val q: Quotes) {
       case LuaAst.Ref(prefix, name) => '{ LuaAst.Ref(${ Expr(prefix) }, ${ Expr(name) }) }
       case LuaAst.Block(stats) => '{ LuaAst.Block(${ Expr(stats) }) }
       case LuaAst.Dispatch(sym, args) => '{ LuaAst.Dispatch(${ apply(sym).asExprOf[LuaAst.Ref] }, ${ Expr(args) }) }
-      case LuaAst.Invoke(sym, args) => '{ LuaAst.Invoke(${ apply(sym).asExprOf[LuaAst.Ref] }, ${ Expr(args) }) }
+      case LuaAst.Invoke(sym, args) => '{ LuaAst.Invoke(${ apply(sym).asExprOf[LuaAst.LuaExpr] }, ${ Expr(args) }) }
       case LuaAst.InfixOperation(l, o, r) => '{ LuaAst.InfixOperation(${ Expr(l) }, ${ Expr(o) }, ${ Expr(r) }) }
       case LuaAst.UnaryOperation(o, e) => '{ LuaAst.UnaryOperation(${ Expr(o) }, ${ Expr(e) }) }
       case LuaAst.IfThenElse(cond, thenB, elseB) => '{ LuaAst.IfThenElse(${ Expr(cond) }, ${ Expr(thenB) }, ${ Expr(elseB) }) }
