@@ -36,7 +36,7 @@ object ScalaLuaExtensions {
         val res = List[U]()
         iterate(ipairs(list)).apply { (idx, value) =>
           iterate(ipairs(f(value))).apply { (subidx, value2) =>
-            res(res.size + 1) = value2
+            res(res.size() + 1) = value2
           }
         }
         res
@@ -45,7 +45,7 @@ object ScalaLuaExtensions {
         val res = List[T]()
         iterate(ipairs(list)).apply { (idx, value) =>
           if (f(value)) {
-            res(res.size + 1) = value
+            res(res.size() + 1) = value
           }
         }
         res
